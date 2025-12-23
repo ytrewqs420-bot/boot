@@ -41,14 +41,23 @@
         // --- CONFIGURATION ---
         // If running in the preview environment, use provided config. 
         // If deploying to GitHub, the user can replace this with their own.
-        const firebaseConfig = window.__firebase_config ? JSON.parse(window.__firebase_config) : {
-            apiKey: "",
-            authDomain: "your-app.firebaseapp.com",
-            projectId: "your-app",
-            storageBucket: "your-app.appspot.com",
-            messagingSenderId: "123",
-            appId: "1:123:web:abc"
-        };
+        const firebaseConfig = {
+
+  apiKey: "AIzaSyB1QJOl6qVvhSUxHEeIF_83D4mTksjugfU",
+
+  authDomain: "coding-b0471.firebaseapp.com",
+
+  projectId: "coding-b0471",
+
+  storageBucket: "coding-b0471.firebasestorage.app",
+
+  messagingSenderId: "313315345242",
+
+  appId: "1:313315345242:web:ef5c0f972042a89fc3a963",
+
+  measurementId: "G-ZH8CJF85YM"
+
+};
 
         const appId = window.__app_id || 'focuslab-habit-tracker';
         
