@@ -19,6 +19,7 @@
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
         import { getFirestore, doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
+        // Assign to window for React script to access
         window.FirebaseSDK = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot, collection };
     </script>
 
@@ -29,8 +30,6 @@
         .custom-scrollbar::-webkit-scrollbar-track { background: #f8fafc; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
         .sticky-col { position: sticky; left: 0; z-index: 20; background: white; }
-        
-        /* Smooth transitions for a premium feel */
         .transition-all { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
     </style>
 </head>
@@ -38,26 +37,28 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
-        const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot } = window.FirebaseSDK;
-
-        // --- CONFIGURATION ---
-        // Fallback to empty if not provided. Note: App requires valid API Key to function in Cloud Mode.
-        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-        const firebaseConfig = {
-          apiKey: "AIzaSyB1QJOl6qVvhSUxHEeIF_83D4mTksjugfU",
-          authDomain: "coding-b0471.firebaseapp.com",
-          projectId: "coding-b0471",
-          storageBucket: "coding-b0471.firebasestorage.app",
-          messagingSenderId: "313315345242",
-          appId: "1:313315345242:web:ef5c0f972042a89fc3a963",
-          measurementId: "G-ZH8CJF85YM"
-        };
-
-        const appId = window.__app_id || 'focuslab-habit-tracker';
-        
-        // --- APP LOGIC ---
+        /**
+         * FOCUSLAB HABIT TRACKER - GITHUB PAGES READY
+         */
         const App = () => {
+            const { useState, useEffect, useMemo } = React;
+
+            // --- CONSTANTS MOVED INSIDE SCOPE TO PREVENT REFERENCE ERRORS ---
+            const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+            const CATEGORIES = [
+                { label: 'Morning', color: 'text-amber-500', bg: 'bg-amber-50' },
+                { label: 'Afternoon', color: 'text-indigo-500', bg: 'bg-indigo-50' },
+                { label: 'Evening', color: 'text-purple-500', bg: 'bg-purple-50' }
+            ];
+            const DEFAULT_HABITS = [
+                { id: '1', name: 'Hydration', icon: '💧', target: 7, category: 'Morning' },
+                { id: '2', name: 'Mindfulness', icon: '🧘', target: 5, category: 'Morning' },
+                { id: '3', name: 'Deep Work', icon: '💻', target: 5, category: 'Afternoon' },
+                { id: '4', name: 'Fitness', icon: '💪', target: 4, category: 'Afternoon' },
+                { id: '5', name: 'Reading', icon: '📖', target: 7, category: 'Evening' }
+            ];
+
+            // --- STATE ---
             const [user, setUser] = useState(null);
             const [habits, setHabits] = useState([]);
             const [completions, setCompletions] = useState({});
@@ -67,24 +68,40 @@
             const [syncStatus, setSyncStatus] = useState('initializing');
             const [errorMessage, setErrorMessage] = useState(null);
 
-            // Initialize Firebase Services inside the component to handle errors
+            // --- FIREBASE CONFIG ---
+            const firebaseConfig = window.__firebase_config ? JSON.parse(window.__firebase_config) : {
+                apiKey: "", 
+                authDomain: "",
+                projectId: "",
+                storageBucket: "",
+                messagingSenderId: "",
+                appId: ""
+            };
+
+            const appId = window.__app_id || 'focuslab-habit-tracker';
+
+            // --- INITIALIZE SERVICES ---
             const services = useMemo(() => {
+                if (!window.FirebaseSDK) return null;
+                const { initializeApp, getAuth, getFirestore } = window.FirebaseSDK;
                 try {
-                    if (!firebaseConfig.apiKey) throw new Error("Missing API Key");
+                    if (!firebaseConfig.apiKey) return null;
                     const app = initializeApp(firebaseConfig);
                     return { auth: getAuth(app), db: getFirestore(app) };
                 } catch (e) {
-                    console.warn("Firebase Init Error:", e.message);
+                    console.error("Firebase Init Error:", e);
                     return null;
                 }
             }, []);
 
-            // Auth logic (Rule 3)
+            // --- AUTHENTICATION ---
             useEffect(() => {
                 if (!services) {
                     setSyncStatus('config_needed');
                     return;
                 }
+
+                const { signInWithCustomToken, signInAnonymously, onAuthStateChanged } = window.FirebaseSDK;
 
                 const initAuth = async () => {
                     try {
@@ -95,7 +112,7 @@
                         }
                     } catch (e) {
                         console.error("Auth Error:", e);
-                        setErrorMessage("Failed to connect to secure storage.");
+                        setErrorMessage("Network error: Firebase Auth failed. Please check your API key and network connection.");
                         setSyncStatus('error');
                     }
                 };
@@ -108,9 +125,10 @@
                 return () => unsubscribe();
             }, [services]);
 
-            // Data sync logic (Rule 1 & 2)
+            // --- DATA SYNC ---
             useEffect(() => {
                 if (!user || !services) return;
+                const { doc, onSnapshot } = window.FirebaseSDK;
                 
                 const dataDocRef = doc(services.db, 'artifacts', appId, 'users', user.uid, 'data', 'habits_v1');
                 
@@ -120,16 +138,14 @@
                         setHabits(data.habits || []);
                         setCompletions(data.completions || {});
                     } else {
-                        // Initial state for new users
-                        setHabits([
-                            { id: '1', name: 'Hydration', icon: '💧', target: 7, category: 'Morning' },
-                            { id: '2', name: 'Mindfulness', icon: '🧘', target: 5, category: 'Morning' }
-                        ]);
+                        setHabits(DEFAULT_HABITS);
                     }
                     setSyncStatus('synced');
+                    setErrorMessage(null);
                 }, (err) => {
                     console.error("Sync Error:", err);
                     setSyncStatus('error');
+                    setErrorMessage("Cloud sync failed. Check your Firestore rules.");
                 });
 
                 return () => unsubscribe();
@@ -137,6 +153,7 @@
 
             const save = async (h, c) => {
                 if (!user || !services) return;
+                const { doc, setDoc } = window.FirebaseSDK;
                 setSyncStatus('syncing');
                 try {
                     const dataDocRef = doc(services.db, 'artifacts', appId, 'users', user.uid, 'data', 'habits_v1');
@@ -178,7 +195,7 @@
                 return Math.round((done / (habits.length * daysInMonth)) * 100);
             }, [habits, completions, daysInMonth, currentDate]);
 
-            // --- LOADING & ERROR STATES ---
+            // --- UI STATES ---
             if (syncStatus === 'config_needed') {
                 return (
                     <div className="h-screen flex items-center justify-center p-6 bg-slate-50">
@@ -188,7 +205,7 @@
                             </div>
                             <h2 className="text-2xl font-black">Configuration Required</h2>
                             <p className="text-slate-500 text-sm leading-relaxed">
-                                To enable <b>Cloud Sync</b> on GitHub Pages, you need to add your Firebase Project settings to the <code>firebaseConfig</code> object in the code.
+                                To enable <b>Cloud Sync</b> on GitHub Pages, you must add your Firebase Project settings to the <code>firebaseConfig</code> object.
                             </p>
                         </div>
                     </div>
@@ -208,6 +225,13 @@
 
             return (
                 <div className="p-4 sm:p-10 max-w-7xl mx-auto space-y-6 md:space-y-10 animate-in fade-in duration-700">
+                    {errorMessage && (
+                        <div className="bg-red-50 border border-red-100 p-4 rounded-2xl text-red-600 text-xs font-bold flex justify-between items-center">
+                            <span>{errorMessage}</span>
+                            <button onClick={() => setErrorMessage(null)}>✕</button>
+                        </div>
+                    )}
+
                     <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                         <div>
                             <div className="flex items-center gap-2 mb-1">
@@ -248,7 +272,7 @@
                             <div className="relative z-10">
                                 <div className="text-xs font-black uppercase tracking-widest opacity-60 mb-2">Private Ecosystem</div>
                                 <div className="text-4xl font-black mb-2 tracking-tight">Active Sync</div>
-                                <p className="text-sm opacity-80 max-w-sm font-medium leading-relaxed">Your progress is tied to your browser identity and backed up automatically to the cloud.</p>
+                                <p className="text-sm opacity-80 max-w-sm font-medium leading-relaxed">Your rituals are automatically encrypted and synced across all your devices.</p>
                             </div>
                             <div className="absolute -bottom-10 -right-10 text-[10rem] font-black opacity-10 select-none pointer-events-none">FOCUS</div>
                         </div>
@@ -261,7 +285,7 @@
                                     <tr className="bg-slate-50/50">
                                         <th className="sticky left-0 bg-slate-50 p-6 text-left border-b border-slate-100 min-w-[200px] z-30">
                                             <div className="flex items-center justify-between">
-                                                <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Habit Rituals</span>
+                                                <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Rituals</span>
                                                 <button onClick={() => setIsAdding(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white w-7 h-7 rounded-xl flex items-center justify-center font-bold shadow-lg shadow-indigo-200 transition-all active:scale-90">+</button>
                                             </div>
                                         </th>
@@ -282,10 +306,8 @@
                                                     <span className="text-2xl filter group-hover:scale-110 transition-all">{h.icon}</span>
                                                     <div className="min-w-0">
                                                         <div className="font-bold text-sm text-slate-800 truncate">{h.name}</div>
-                                                        <div className="flex gap-2">
-                                                            <div className={`text-[8px] font-black uppercase tracking-widest ${h.category === 'Morning' ? 'text-amber-500' : h.category === 'Afternoon' ? 'text-indigo-500' : 'text-purple-500'}`}>
-                                                                {h.category}
-                                                            </div>
+                                                        <div className={`text-[8px] font-black uppercase tracking-widest ${CATEGORIES.find(c => c.label === h.category)?.color || 'text-slate-400'}`}>
+                                                            {h.category}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -318,17 +340,17 @@
                                 <h2 className="text-2xl font-black mb-8 tracking-tight">Design Ritual</h2>
                                 <div className="space-y-6">
                                     <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Identity</label>
+                                        <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Icon & Identity</label>
                                         <div className="flex gap-2">
                                             <input type="text" value={newHabit.icon} onChange={e => setNewHabit({...newHabit, icon: e.target.value})} className="w-16 p-4 bg-slate-50 border border-slate-100 rounded-2xl text-2xl text-center outline-none focus:ring-2 ring-indigo-500/10" placeholder="✨" />
-                                            <input type="text" value={newHabit.name} onChange={e => setNewHabit({...newHabit, name: e.target.value})} className="flex-1 p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold outline-none focus:ring-2 ring-indigo-500/10" placeholder="Ritual Name" />
+                                            <input type="text" value={newHabit.name} onChange={e => setNewHabit({...newHabit, name: e.target.value})} className="flex-1 p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold outline-none focus:ring-2 ring-indigo-500/10" placeholder="Habit Name" />
                                         </div>
                                     </div>
                                     <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Timing</label>
+                                        <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Time of Day</label>
                                         <div className="flex gap-2">
-                                            {['Morning', 'Afternoon', 'Evening'].map(cat => (
-                                                <button key={cat} onClick={() => setNewHabit({...newHabit, category: cat})} className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase border transition-all ${newHabit.category === cat ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{cat}</button>
+                                            {CATEGORIES.map(cat => (
+                                                <button key={cat.label} onClick={() => setNewHabit({...newHabit, category: cat.label})} className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase border transition-all ${newHabit.category === cat.label ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{cat.label}</button>
                                             ))}
                                         </div>
                                     </div>
@@ -355,7 +377,8 @@
             );
         };
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
+        const container = document.getElementById('root');
+        const root = ReactDOM.createRoot(container);
         root.render(<App />);
     </script>
 </body>
