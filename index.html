@@ -34,25 +34,28 @@
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
-        body { font-family: 'Inter', sans-serif; background-color: #F9FAFB; overflow-x: hidden; }
+        body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; overflow-x: hidden; }
         .custom-scrollbar::-webkit-scrollbar { height: 4px; width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         .sticky-col { position: sticky; left: 0; z-index: 40; background: white; box-shadow: 4px 0 10px -2px rgba(0,0,0,0.05); }
         .integrity-gradient { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); }
         .check-anim { transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); }
-        .check-anim:active { scale: 0.9; }
-        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .markdown-body h1, .markdown-body h2 { font-weight: 800; margin-top: 1em; margin-bottom: 0.5em; }
+        .check-anim:active { transform: scale(0.85); }
+        .urgent-pulse { animation: borderPulse 2s infinite; }
+        @keyframes borderPulse { 0%, 100% { border-color: #ef4444; box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.2); } 50% { border-color: #fee2e2; box-shadow: 0 0 15px 5px rgba(239, 68, 68, 0.1); } }
+        .markdown-body h1, .markdown-body h2 { font-weight: 800; margin-top: 1em; margin-bottom: 0.5em; color: #1e293b; }
         .markdown-body p { margin-bottom: 0.8em; }
         .markdown-body ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 1em; }
-        .markdown-body code { background: rgba(0,0,0,0.05); padding: 0.2em 0.4em; border-radius: 4px; font-family: monospace; }
+        .markdown-body code { background: #f1f5f9; padding: 0.2em 0.4em; border-radius: 4px; font-family: monospace; font-size: 0.9em; }
         .katex-display { margin: 1em 0; overflow-x: auto; overflow-y: hidden; }
+        .fab-menu-item { transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); opacity: 0; transform: translateY(20px) scale(0.5); }
+        .fab-container:hover .fab-menu-item { opacity: 1; transform: translateY(0) scale(1); }
+        .glass-morphism { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); }
         .clock-pulse { animation: pulse 2s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
     </style>
 </head>
-<body class="text-slate-900">
+<body class="text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
     <div id="root"></div>
 
     <script type="text/babel">
@@ -64,8 +67,8 @@
             { id: '4', name: 'Reading', icon: '📖', category: 'Evening', priority: 'support', limit: 24 }
         ];
 
-        const DEFAULT_PERSONA = "You are a Mindful Productivity Adviser for FocusLab. Focus on keeping words consistent with actions. Correlate user journal entries with their behavioral completion data to find blockers. Use Markdown and LaTeX ($...$).";
-        const STORAGE_KEY = 'focuslab_behavioral_v3.5_journal_access';
+        const DEFAULT_PERSONA = "You are the 'Mindful Architect,' a grounded mentor for FocusLab. Integrity is math: $I = \\frac{\\sum Actions}{\\sum Promises}$. If I skip a ritual, curiously investigate the friction. Use Markdown and LaTeX.";
+        const STORAGE_KEY = 'focuslab_v3.6_gemini2.5_final';
         const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
         // --- COMPONENTS ---
@@ -84,8 +87,8 @@
             }, [text]);
             const htmlContent = React.useMemo(() => text ? marked.parse(text) : "", [text]);
             return (
-                <div className={`flex ${role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
-                    <div ref={containerRef} className={`max-w-[90%] p-4 rounded-3xl text-sm leading-relaxed markdown-body ${role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-800 shadow-sm'}`} dangerouslySetInnerHTML={{ __html: htmlContent }} />
+                <div className={`flex ${role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in mb-4`}>
+                    <div ref={containerRef} className={`max-w-[90%] p-4 rounded-3xl text-sm leading-relaxed markdown-body ${role === 'user' ? 'bg-indigo-600 text-white shadow-xl' : 'bg-white border border-slate-100 text-slate-800 shadow-sm'}`} dangerouslySetInnerHTML={{ __html: htmlContent }} />
                 </div>
             );
         };
@@ -108,6 +111,7 @@
             const [logTab, setLogTab] = useState('integrity');
             const [isAiOpen, setIsAiOpen] = useState(false);
             const [isJournalOpen, setIsJournalOpen] = useState(false);
+            const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
             const [journalInput, setJournalInput] = useState("");
             const [aiInput, setAiInput] = useState("");
             const [isAiLoading, setIsAiLoading] = useState(false);
@@ -116,23 +120,22 @@
             });
             const [time, setTime] = useState(new Date());
 
-            // --- FIREBASE SERVICES ---
+            // --- SERVICES ---
             const services = useMemo(() => {
                 if (!window.FirebaseSDK) return null;
                 const { initializeApp, getAuth, getFirestore } = window.FirebaseSDK;
-                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-                if (!firebaseConfig) return null;
-                
+                const config = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+                if (!config) return null;
                 try {
-                    const app = initializeApp(firebaseConfig);
+                    const app = initializeApp(config);
                     const auth = getAuth(app);
                     const db = getFirestore(app);
-                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'focuslab-integrity';
-                    return { app, auth, db, appId };
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'focuslab-v1';
+                    return { auth, db, appId };
                 } catch (e) { return null; }
             }, []);
 
-            // --- COMPUTED ---
+            // --- LOGIC ENGINE ---
             const adjustedTime = useMemo(() => {
                 const utc = time.getTime() + (time.getTimezoneOffset() * 60000);
                 return new Date(utc + (3600000 * systemState.gmtOffset));
@@ -142,16 +145,16 @@
             const todayKey = `${adjustedTime.getUTCFullYear()}-${String(adjustedTime.getUTCMonth() + 1).padStart(2, '0')}-${String(adjustedTime.getUTCDate()).padStart(2, '0')}`;
             const activeChat = useMemo(() => conversations.find(c => c.id === activeChatId), [conversations, activeChatId]);
 
-            // --- PERSISTENCE ---
             const save = async (h, c, s, logs, journal, chats) => {
                 const payload = { habits: h, completions: c, systemState: s, activityLogs: logs, journalEntries: journal, conversations: chats };
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-                
                 if (user && !user.isAnonymous && services) {
-                    try {
+                    try { 
                         const { doc, setDoc } = window.FirebaseSDK;
-                        await setDoc(doc(services.db, 'artifacts', services.appId, 'users', user.uid, 'data', 'behavioral_v3'), payload, { merge: true });
-                    } catch (e) { console.error(e); }
+                        await setDoc(doc(services.db, 'artifacts', services.appId, 'users', user.uid, 'data', 'behavioral_v3'), payload, { merge: true }); 
+                    } catch (e) {
+                        console.error("Save error:", e);
+                    }
                 }
             };
 
@@ -162,78 +165,80 @@
                 return updated;
             };
 
-            // --- AI LOGIC ---
+            // --- GEMINI 2.5 FLASH AI ENGINE ---
             const callGemini = async (prompt, currentMessages) => {
                 const apiKey = systemState.geminiKey;
-                if (!apiKey) return;
-                setIsAiLoading(true);
+                if (!apiKey) {
+                    addAssistantMessage("Error: No API Key found. Go to Settings (⚙️) to add your Gemini key.");
+                    return;
+                }
                 
-                // Enhanced Context: Including Journals
+                setIsAiLoading(true);
                 const recentJournals = journalEntries.slice(0, 5).map(j => `[${new Date(j.timestamp).toLocaleDateString()}]: ${j.text}`).join('\n');
                 
                 const systemPrompt = `${systemState.geminiPersona}
                 
-                CURRENT CONTEXT:
-                - Timezone: GMT+${systemState.gmtOffset}
-                - Rituals Defined: ${JSON.stringify(habits)}
-                - Points: ${integrityMetrics.pts}
-                - User Identity Title: ${integrityMetrics.title}
-                
-                RECENT JOURNAL ENTRIES (USER REFLECTIONS):
-                ${recentJournals || "No journal entries recorded yet."}
-                
-                Analyze the patterns between their ritual adherence and their journal entries.`;
+                USER CONTEXT:
+                - Integrity Quotient: ${integrityMetrics.pts}pts
+                - Status: ${integrityMetrics.title}
+                - Ritual Matrix: ${JSON.stringify(habits)}
+                - Recent Behavioral Logs: ${JSON.stringify(activityLogs.slice(0, 5))}
+                - Subjective Journals:
+                ${recentJournals || "No reflections recorded."}`;
                 
                 try {
+                    // Use gemini-2.5-flash-preview-09-2025 as the model string
                     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
-                            contents: currentMessages.map(m => ({
-                                role: m.role === 'assistant' ? 'model' : 'user',
-                                parts: [{ text: m.text }]
+                            contents: currentMessages.map(m => ({ 
+                                role: m.role === 'assistant' ? 'model' : 'user', 
+                                parts: [{ text: m.text }] 
                             })),
-                            systemInstruction: { parts: [{ text: systemPrompt }] }
+                            systemInstruction: { parts: [{ text: systemPrompt }] },
+                            safetySettings: [
+                                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+                                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+                            ]
                         })
                     });
-                    const data = await res.json();
-                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "Reflection failed.";
                     
-                    const updatedChats = conversations.map(c => 
-                        c.id === activeChatId ? { ...c, messages: [...c.messages, { role: 'assistant', text }], lastUpdated: new Date().toISOString() } : c
-                    );
-                    setConversations(updatedChats);
-                    save(habits, completions, systemState, activityLogs, journalEntries, updatedChats);
-                } catch (e) { console.error(e); } finally { setIsAiLoading(false); }
+                    const data = await res.json();
+                    if (data.error) throw new Error(data.error.message);
+
+                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "The architect remains silent. Try rephrasing.";
+                    const updated = conversations.map(c => c.id === activeChatId ? { 
+                        ...c, 
+                        messages: [...c.messages, { role: 'assistant', text }], 
+                        lastUpdated: new Date().toISOString() 
+                    } : c);
+                    setConversations(updated);
+                    save(habits, completions, systemState, activityLogs, journalEntries, updated);
+                } catch (e) {
+                    addAssistantMessage(`Adviser Error: ${e.message}`);
+                } finally { setIsAiLoading(false); }
+            };
+
+            const addAssistantMessage = (msg) => {
+                const updated = conversations.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, { role: 'assistant', text: msg }] } : c);
+                setConversations(updated);
             };
 
             const handleAiSend = () => {
                 if (!aiInput.trim() || isAiLoading || !activeChatId) return;
-                const prompt = aiInput;
-                setAiInput("");
-
-                const updatedChats = conversations.map(c => 
-                    c.id === activeChatId ? { 
-                        ...c, 
-                        messages: [...c.messages, { role: 'user', text: prompt }], 
-                        lastUpdated: new Date().toISOString() 
-                    } : c
-                );
-                setConversations(updatedChats);
-                const currentSession = updatedChats.find(c => c.id === activeChatId);
+                const prompt = aiInput; setAiInput("");
+                const updated = conversations.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, { role: 'user', text: prompt }], lastUpdated: new Date().toISOString() } : c);
+                setConversations(updated);
+                const currentSession = updated.find(c => c.id === activeChatId);
                 callGemini(prompt, currentSession.messages);
             };
 
             const createNewChat = () => {
-                const newChat = {
-                    id: Date.now().toString(),
-                    title: `Session ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`,
-                    messages: [{ role: 'assistant', text: "Adviser present. I have analyzed your recent behavior and journal entries. How shall we proceed?" }],
-                    lastUpdated: new Date().toISOString()
-                };
-                const updated = [newChat, ...conversations];
-                setConversations(updated);
-                setActiveChatId(newChat.id);
+                const newChat = { id: Date.now().toString(), title: `Chat ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`, messages: [{ role: 'assistant', text: "Adviser present. I've analyzed your journals and rituals. Where is the friction today?" }], lastUpdated: new Date().toISOString() };
+                const updated = [newChat, ...conversations]; setConversations(updated); setActiveChatId(newChat.id);
                 save(habits, completions, systemState, activityLogs, journalEntries, updated);
             };
 
@@ -244,39 +249,7 @@
                 save(habits, completions, systemState, activityLogs, journalEntries, updated);
             };
 
-            // --- INITIALIZATION ---
-            useEffect(() => {
-                const timer = setInterval(() => setTime(new Date()), 1000);
-                const local = localStorage.getItem(STORAGE_KEY);
-                if (local) {
-                    const p = JSON.parse(local);
-                    setHabits(p.habits || DEFAULT_HABITS);
-                    setCompletions(p.completions || {});
-                    setActivityLogs(p.activityLogs || []);
-                    setJournalEntries(p.journalEntries || []);
-                    setConversations(p.conversations || []);
-                    if (p.systemState) setSystemState(p.systemState);
-                    if (p.conversations?.length) setActiveChatId(p.conversations[0].id);
-                }
-                return () => clearInterval(timer);
-            }, []);
-
-            useEffect(() => {
-                if (!services) return;
-                const { signInAnonymously, onAuthStateChanged, signInWithCustomToken } = window.FirebaseSDK;
-                const initAuth = async () => {
-                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                        await signInWithCustomToken(services.auth, __initial_auth_token);
-                    } else {
-                        await signInAnonymously(services.auth);
-                    }
-                };
-                initAuth();
-                const unsubscribe = onAuthStateChanged(services.auth, setUser);
-                return () => unsubscribe();
-            }, [services]);
-
-            // --- INTEGRITY LOGIC ---
+            // --- ANALYTICS ---
             const integrityMetrics = useMemo(() => {
                 let pts = 0; let logs = [];
                 Object.keys(completions).forEach(k => {
@@ -285,181 +258,261 @@
                     if (!c.isLate) pts++; else pts -= 0.5;
                     logs.push({ type: c.isLate ? 'minus' : 'plus', points: c.isLate ? '-0.5' : '+1.0', reason: `${c.isLate ? 'Late' : 'Kept'}: ${h.name}`, date: `${parts[2]}/${parts[1]}`, time: new Date(c.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) });
                 });
-                return { pts, title: pts > 50 ? "The Integrated" : pts > 10 ? "The Practitioner" : "The Observer", logs };
+                const tiers = [{t: "The Observer", m: 0}, {t: "The Practitioner", m: 10}, {t: "The Integrated", m: 50}, {t: "The Architect", m: 100}];
+                const currentTier = tiers.filter(t => pts >= t.m).pop();
+                const nextTier = tiers[tiers.indexOf(currentTier) + 1] || currentTier;
+                const progress = nextTier === currentTier ? 100 : ((pts - currentTier.m) / (nextTier.m - currentTier.m)) * 100;
+                return { pts, title: currentTier.t, nextTier: nextTier.t, progress, logs };
             }, [habits, completions]);
+
+            const getStreak = (hid) => {
+                let streak = 0; let d = new Date(adjustedTime);
+                while(true) {
+                    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}-${hid}`;
+                    if (completions[key] && !completions[key].isLate) { streak++; d.setUTCDate(d.getUTCDate() - 1); }
+                    else break;
+                }
+                return streak;
+            };
 
             const isCommitted = systemState.lastCommit === todayKey;
 
+            useEffect(() => {
+                const timer = setInterval(() => setTime(new Date()), 1000);
+                const local = localStorage.getItem(STORAGE_KEY);
+                if (local) {
+                    const p = JSON.parse(local);
+                    setHabits(p.habits || DEFAULT_HABITS); setCompletions(p.completions || {});
+                    setActivityLogs(p.activityLogs || []); setJournalEntries(p.journalEntries || []);
+                    setConversations(p.conversations || []); if (p.systemState) setSystemState(p.systemState);
+                    if (p.conversations?.length) setActiveChatId(p.conversations[0].id);
+                }
+                return () => clearInterval(timer);
+            }, []);
+
+            useEffect(() => {
+                if (!services) return;
+                const { signInAnonymously, onAuthStateChanged, signInWithCustomToken } = window.FirebaseSDK;
+                const authInit = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(services.auth, __initial_auth_token);
+                        else await signInAnonymously(services.auth);
+                    } catch (e) {}
+                };
+                authInit();
+                return onAuthStateChanged(services.auth, setUser);
+            }, [services]);
+
             return (
-                <div className="pb-10 px-4 sm:px-10">
-                    <div className="max-w-7xl mx-auto space-y-8 mt-10 animate-fade-in">
-                        <header className="flex justify-between items-end">
+                <div className="pb-24 px-4 sm:px-10 max-w-7xl mx-auto space-y-10 mt-6 md:mt-10 animate-fade-in">
+                    
+                    {/* IDENTITY HEADER */}
+                    <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 bg-white p-6 md:p-10 rounded-[3rem] shadow-sm border border-slate-100">
+                        <div className="space-y-4 w-full md:w-auto">
                             <div className="space-y-1">
-                                <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">FocusLab v3.5 • {integrityMetrics.title}</span>
-                                <h1 className="text-5xl font-black tracking-tighter">Behavioral Analysis</h1>
-                            </div>
-                            <div className="bg-white p-2 rounded-full shadow-lg border flex items-center gap-3">
-                                <div className="px-4 py-2 bg-slate-900 text-white rounded-full text-xs font-black flex items-center gap-2">
-                                    <div className="w-2 h-2 bg-emerald-500 rounded-full clock-pulse" />
-                                    {adjustedTime.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true, timeZone:'UTC'})}
+                                <div className="flex items-center gap-3">
+                                    <span className="h-2 w-2 bg-indigo-600 rounded-full animate-pulse" />
+                                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">{integrityMetrics.title}</span>
                                 </div>
-                                <button onClick={() => setIsInfoOpen(true)} className="w-10 h-10 rounded-full border flex items-center justify-center hover:bg-slate-50 transition-colors">⚙️</button>
+                                <h1 className="text-4xl md:text-6xl font-black tracking-tighter text-slate-900">Identity Evolution</h1>
                             </div>
-                        </header>
+                            <div className="w-full md:w-64">
+                                <div className="flex justify-between text-[8px] font-black uppercase text-slate-400 mb-1 tracking-widest">
+                                    <span>Progress to {integrityMetrics.nextTier}</span>
+                                    <span>{Math.round(integrityMetrics.progress)}%</span>
+                                </div>
+                                <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                    <div className="h-full bg-indigo-600 transition-all duration-1000 ease-out" style={{ width: `${integrityMetrics.progress}%` }} />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-full border border-slate-200/50">
+                            <div className="px-6 py-3 bg-slate-900 text-white rounded-full text-xs font-black shadow-lg">
+                                {adjustedTime.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true, timeZone:'UTC'})}
+                            </div>
+                            <button onClick={() => setIsInfoOpen(true)} className="w-12 h-12 rounded-full bg-white shadow-sm border border-slate-200 flex items-center justify-center hover:bg-slate-100 transition-all">⚙️</button>
+                        </div>
+                    </header>
 
-                        <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div className={`p-8 rounded-[3rem] shadow-xl ${isCommitted ? 'bg-white border' : 'integrity-gradient text-white'}`}>
-                                <h3 className="text-[10px] font-black uppercase opacity-60 mb-4 tracking-widest">Commitment</h3>
-                                {!isCommitted ? <button onClick={() => {
-                                    const ns = {...systemState, lastCommit: todayKey, commitTime: Date.now()};
-                                    setSystemState(ns); save(habits, completions, ns, logActivity('commit', todayKey), journalEntries, conversations);
-                                }} className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black shadow-xl">Seal Today</button> : <p className="text-xl font-bold italic">Oath active. Grid unlocked.</p>}
+                    {/* DASHBOARD */}
+                    <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className={`p-8 rounded-[3.5rem] shadow-xl transition-all duration-500 flex flex-col justify-between min-h-[220px] ${isCommitted ? 'bg-white border' : 'integrity-gradient text-white shadow-indigo-200/50'}`}>
+                            <div>
+                                <h3 className="text-[10px] font-black uppercase opacity-60 mb-2 tracking-widest">Daily Oath</h3>
+                                {!isCommitted ? <p className="text-lg font-bold leading-tight">Commit your word to unlock the grid.</p> : <p className="text-lg font-bold italic">Identity locked. Rituals active.</p>}
                             </div>
-                            <div className="bg-white p-8 rounded-[3rem] shadow-xl border flex flex-col justify-center items-center">
-                                <div className="text-6xl font-black">{integrityMetrics.pts}</div>
-                                <div className="text-[10px] font-black uppercase text-slate-400 mt-2 tracking-widest text-center">Integrity Score</div>
-                            </div>
-                            <div className="bg-indigo-600 p-8 rounded-[3rem] shadow-xl text-white flex flex-col justify-between">
-                                <p className="text-sm font-medium opacity-80">AI Adviser now analyzing your Journal entries.</p>
-                                <button onClick={() => { if(!conversations.length) createNewChat(); setIsAiOpen(true); }} className="w-full py-3 bg-white/20 rounded-xl font-black text-xs uppercase tracking-widest backdrop-blur-md">Enter Mindful Chat</button>
-                            </div>
-                        </section>
+                            {!isCommitted && <button onClick={() => {
+                                const ns = {...systemState, lastCommit: todayKey, commitTime: Date.now()};
+                                setSystemState(ns); save(habits, completions, ns, logActivity('commit', todayKey), journalEntries, conversations);
+                            }} className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black shadow-xl hover:scale-105 transition-all">Seal Today</button>}
+                        </div>
+                        <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border flex flex-col justify-center items-center group">
+                            <div className="text-7xl font-black tracking-tighter group-hover:text-indigo-600 transition-colors">{integrityMetrics.pts}</div>
+                            <div className="text-[10px] font-black uppercase text-slate-400 mt-2 tracking-[0.2em]">Honesty Quotient</div>
+                        </div>
+                        <div className="bg-indigo-600 p-8 rounded-[3.5rem] shadow-xl text-white flex flex-col justify-between relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl" />
+                            <p className="text-sm font-medium opacity-90 italic z-10">"Behavior is the only truth."</p>
+                            <button onClick={() => setIsJournalOpen(true)} className="w-full py-4 bg-white text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-50 transition-all z-10">New Reflection 📝</button>
+                        </div>
+                    </section>
 
-                        <div className={`bg-white rounded-[3rem] shadow-2xl border overflow-hidden relative ${!isCommitted ? 'opacity-20 blur-md pointer-events-none' : ''}`}>
-                            <div className="overflow-x-auto custom-scrollbar">
-                                <table className="w-full border-collapse">
-                                    <thead className="bg-slate-50/50">
-                                        <tr>
-                                            <th className="sticky-col p-6 text-left border-b min-w-[200px]"><span className="text-[10px] font-black uppercase text-slate-400">Ritual Stack</span></th>
-                                            {Array.from({length:31}, (_,i)=>i+1).map(d => <th key={d} className="p-4 border-b text-[10px] font-black text-slate-300">{d}</th>)}
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-50">
-                                        {habits.map(h => (
+                    {/* RITUAL GRID */}
+                    <div className={`bg-white rounded-[4rem] shadow-2xl border border-slate-100 overflow-hidden transition-all duration-700 ${!isCommitted ? 'opacity-20 blur-md pointer-events-none' : ''}`}>
+                        <div className="overflow-x-auto custom-scrollbar">
+                            <table className="w-full border-collapse">
+                                <thead className="bg-slate-50/50">
+                                    <tr>
+                                        <th className="sticky-col p-8 text-left border-b min-w-[240px]"><span className="text-[11px] font-black uppercase text-slate-400 tracking-[0.2em]">Ritual Stack</span></th>
+                                        {Array.from({length:31}, (_,i)=>i+1).map(d => (
+                                            <th key={d} className={`p-4 border-b text-[10px] font-black ${d === adjustedTime.getUTCDate() ? 'text-indigo-600 bg-indigo-50/50' : 'text-slate-300'}`}>{d}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-50">
+                                    {habits.map(h => {
+                                        const streak = getStreak(h.id);
+                                        return (
                                             <tr key={h.id} className="group hover:bg-slate-50/10 transition-colors">
-                                                <td className="sticky-col p-6 font-bold text-sm">{h.icon} {h.name}</td>
+                                                <td className="sticky-col p-8">
+                                                    <div className="flex flex-col gap-1">
+                                                        <div className="flex items-center gap-3">
+                                                            <span className="text-2xl">{h.icon}</span>
+                                                            <div className="font-bold text-base text-slate-800">{h.name}</div>
+                                                            {streak > 2 && <span className="text-[10px] font-black text-orange-500">{streak}🔥</span>}
+                                                        </div>
+                                                    </div>
+                                                </td>
                                                 {Array.from({length:31}, (_,i)=>i+1).map(day => {
                                                     const key = `${viewDate.getFullYear()}-${String(viewDate.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}-${h.id}`;
                                                     const isDone = completions[key];
-                                                    return <td key={day} className="p-2 text-center">
-                                                        <button onClick={() => {
-                                                            const isT = `${viewDate.getFullYear()}-${String(viewDate.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}` === todayKey;
-                                                            const newC = {...completions}; if(newC[key]) delete newC[key]; else newC[key] = {timestamp: adjustedTime.toISOString(), isLate: !isT};
-                                                            setCompletions(newC); save(habits, newC, systemState, logActivity('toggle', h.name), journalEntries, conversations);
-                                                        }} className={`w-10 h-10 rounded-2xl flex items-center justify-center mx-auto transition-all ${isDone ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-50 text-slate-200 hover:bg-slate-100'}`}>
-                                                            {isDone ? '✓' : '•'}
-                                                        </button>
-                                                    </td>
+                                                    const isT = day === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth();
+                                                    return (
+                                                        <td key={day} className={`p-2 text-center ${isT ? 'bg-indigo-50/10' : ''}`}>
+                                                            <button onClick={() => {
+                                                                const newC = {...completions}; if(newC[key]) delete newC[key]; else newC[key] = {timestamp: adjustedTime.toISOString(), isLate: !isT};
+                                                                setCompletions(newC); save(habits, newC, systemState, logActivity('toggle', h.name), journalEntries, conversations);
+                                                            }} className={`check-anim w-12 h-12 rounded-2xl flex items-center justify-center mx-auto transition-all ${isDone ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-50 text-slate-200 hover:bg-slate-100'}`}>{isDone ? '✓' : '•'}</button>
+                                                        </td>
+                                                    );
                                                 })}
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
 
                     {/* AI MODAL */}
                     {isAiOpen && (
                         <div className="fixed inset-0 z-[110] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-4">
-                            <div className="bg-white w-full max-w-5xl rounded-[3rem] shadow-2xl h-[85vh] flex overflow-hidden border">
-                                <div className="w-72 bg-slate-50 border-r flex flex-col hidden md:flex">
-                                    <div className="p-6 border-b">
-                                        <button onClick={createNewChat} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg">New Session +</button>
+                            <div className="bg-white w-full max-w-6xl rounded-[4rem] shadow-2xl h-[85vh] flex overflow-hidden border border-white/20">
+                                <div className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 transition-transform duration-300 fixed md:relative z-50 md:z-auto w-72 h-full bg-slate-50 border-r flex flex-col`}>
+                                    <div className="p-8 border-b flex items-center">
+                                        <button onClick={createNewChat} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-lg hover:bg-indigo-700 transition-all">New Session +</button>
+                                        <button onClick={() => setIsSidebarOpen(false)} className="md:hidden ml-4 text-slate-400">✕</button>
                                     </div>
-                                    <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
+                                    <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                                         {conversations.map(c => (
-                                            <div key={c.id} className={`group relative p-4 rounded-2xl cursor-pointer transition-all ${activeChatId === c.id ? 'bg-white shadow-sm border border-indigo-100' : 'hover:bg-slate-100'}`} onClick={() => setActiveChatId(c.id)}>
-                                                <div className="text-[10px] font-black text-slate-400 uppercase mb-1">Session</div>
-                                                <div className="text-xs font-bold truncate pr-6">{c.title}</div>
-                                                <button onClick={(e) => { e.stopPropagation(); deleteChat(c.id); }} className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all">✕</button>
+                                            <div key={c.id} className={`p-5 rounded-[2rem] cursor-pointer transition-all ${activeChatId === c.id ? 'bg-white shadow-sm border border-indigo-100' : 'hover:bg-white/50'}`} onClick={() => { setActiveChatId(c.id); setIsSidebarOpen(false); }}>
+                                                <div className="text-[9px] font-black text-slate-400 uppercase mb-1">Session</div>
+                                                <div className="text-xs font-bold truncate text-slate-700">{c.title}</div>
                                             </div>
                                         ))}
                                     </div>
                                 </div>
-                                <div className="flex-1 flex flex-col bg-white">
+
+                                <div className="flex-1 flex flex-col bg-white relative">
                                     <div className="p-8 border-b flex justify-between items-center bg-indigo-600 text-white shrink-0">
-                                        <div><h2 className="text-2xl font-black">Mindful Session</h2><p className="text-[10px] font-bold uppercase opacity-80">{activeChat?.title || "History Selection"}</p></div>
-                                        <button onClick={() => setIsAiOpen(false)} className="bg-white/20 p-2 rounded-full hover:bg-white/30 transition-colors">✕</button>
+                                        <div className="flex items-center gap-4">
+                                            <button onClick={() => setIsSidebarOpen(true)} className="md:hidden bg-white/20 p-2 rounded-xl">≡</button>
+                                            <h2 className="text-2xl font-black tracking-tight">{activeChat?.title || "Mindful Adviser"}</h2>
+                                        </div>
+                                        <button onClick={() => setIsAiOpen(false)} className="bg-white/20 p-3 rounded-full hover:bg-white/30">✕</button>
                                     </div>
-                                    <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-slate-50/30">
+                                    <div className="flex-1 overflow-y-auto p-6 md:p-10 space-y-6 custom-scrollbar bg-slate-50/30">
                                         {activeChat?.messages.map((m, i) => <AiMessage key={i} text={m.text} role={m.role} />)}
-                                        {isAiLoading && <div className="text-[10px] font-black text-indigo-400 animate-pulse px-4 uppercase tracking-widest text-center">Adviser is cross-referencing your journals...</div>}
+                                        {isAiLoading && <div className="text-[10px] font-black text-indigo-400 animate-pulse uppercase tracking-widest">Architect is reasoning...</div>}
                                     </div>
-                                    <div className="p-6 border-t flex gap-3 bg-white shrink-0">
-                                        <input value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAiSend()} className="flex-1 bg-slate-50 p-4 rounded-2xl text-sm outline-none border" placeholder="Ask the adviser to review your notes..." />
-                                        <button onClick={handleAiSend} className="bg-indigo-600 text-white px-6 rounded-2xl font-black">→</button>
+                                    <div className="p-6 md:p-8 border-t flex gap-4 bg-white shrink-0">
+                                        <input value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAiSend()} className="flex-1 bg-slate-50 p-5 rounded-3xl text-sm outline-none border focus:border-indigo-200" placeholder="Type query..." />
+                                        <button onClick={handleAiSend} className="bg-slate-900 text-white px-8 rounded-3xl font-black">→</button>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* SETTINGS */}
-                    {isInfoOpen && (
-                        <div className="fixed inset-0 z-[110] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-6">
-                            <div className="bg-white w-full max-w-xl rounded-[3rem] p-10 shadow-2xl space-y-6 animate-fade-in flex flex-col max-h-[90vh]">
-                                <h2 className="text-3xl font-black shrink-0">Config</h2>
-                                <div className="space-y-6 overflow-y-auto pr-2 custom-scrollbar">
-                                    <div className="p-6 bg-slate-50 rounded-[2rem] space-y-4">
-                                        <h4 className="text-[10px] font-black text-indigo-600 uppercase">Intelligence Setup</h4>
-                                        <input type="password" value={systemState.geminiKey} onChange={e => { const ns = {...systemState, geminiKey: e.target.value}; setSystemState(ns); save(habits, completions, ns, activityLogs, journalEntries, conversations); }} placeholder="Gemini API Key" className="w-full p-3 bg-white border rounded-xl text-xs outline-none focus:ring-2 ring-indigo-50" />
-                                        <textarea value={systemState.geminiPersona} onChange={e => { const ns = {...systemState, geminiPersona: e.target.value}; setSystemState(ns); save(habits, completions, ns, activityLogs, journalEntries, conversations); }} className="w-full p-3 h-24 bg-white border rounded-xl text-xs outline-none focus:ring-2 ring-indigo-50" />
-                                    </div>
-                                    <div className="p-6 bg-slate-50 rounded-[2rem]">
-                                        <h4 className="text-[10px] font-black text-indigo-600 uppercase mb-4">GMT Calibration</h4>
-                                        <select value={systemState.gmtOffset} onChange={e => { const ns = {...systemState, gmtOffset: parseInt(e.target.value)}; setSystemState(ns); save(habits, completions, ns, activityLogs, journalEntries, conversations); }} className="p-2 w-full rounded-xl font-bold bg-white border outline-none">
-                                            {Array.from({length:27}, (_,i)=>i-12).map(o => <option key={o} value={o}>GMT {o>=0?'+':''}{o}</option>)}
-                                        </select>
-                                    </div>
-                                </div>
-                                <button onClick={() => setIsInfoOpen(false)} className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black text-xs uppercase shrink-0">Close</button>
-                            </div>
+                    {/* COMMAND CENTER FAB */}
+                    <div className="fixed bottom-8 right-8 group fab-container z-[100]">
+                        <div className="flex flex-col items-end gap-3 mb-4 pointer-events-none group-hover:pointer-events-auto">
+                            <button onClick={() => { if(!conversations.length) createNewChat(); setIsAiOpen(true); }} className="fab-menu-item w-14 h-14 bg-indigo-600 text-white rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-indigo-700 pointer-events-auto">🧠</button>
+                            <button onClick={() => setIsJournalOpen(true)} className="fab-menu-item w-14 h-14 bg-white border text-slate-700 rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-slate-50 pointer-events-auto">📝</button>
+                            <button onClick={() => { setLogOpen(true); setLogTab('integrity'); }} className="fab-menu-item w-14 h-14 bg-white border text-slate-700 rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-slate-50 pointer-events-auto">📋</button>
+                            <button onClick={() => setIsInfoOpen(true)} className="fab-menu-item w-14 h-14 bg-white border text-slate-700 rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-slate-50 pointer-events-auto">⚙️</button>
                         </div>
-                    )}
+                        <button className="w-16 h-16 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center transition-transform duration-300 group-hover:rotate-45">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        </button>
+                    </div>
 
-                    {/* LEDGERS */}
-                    {isLogOpen && (
-                        <div className="fixed inset-0 z-[110] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-6">
-                            <div className="bg-white w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl relative flex flex-col max-h-[85vh]">
-                                <button onClick={() => setIsLogOpen(false)} className="absolute top-8 right-8 text-slate-400 font-black">✕</button>
-                                <h2 className="text-3xl font-black tracking-tighter mb-4">Master Ledger</h2>
-                                <div className="flex bg-slate-50 p-1 rounded-2xl mb-6 shrink-0">
-                                    {['integrity', 'activity', 'journal'].map(t => <button key={t} onClick={() => setLogTab(t)} className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${logTab === t ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400'}`}>{t}</button>)}
-                                </div>
-                                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-2">
-                                    {logTab === 'integrity' && integrityMetrics.logs.map((l, i) => <div key={i} className="p-4 bg-slate-50 rounded-2xl border flex justify-between items-center"><div className="space-y-1"><div className="text-[10px] font-black text-slate-400 uppercase">{l.date} • {l.time}</div><div className="text-sm font-bold text-slate-800">{l.reason}</div></div><div className={`text-sm font-black px-2 py-1 rounded-lg ${l.type==='plus'?'text-emerald-600 bg-emerald-50':'text-orange-600 bg-orange-50'}`}>{l.points}</div></div>)}
-                                    {logTab === 'activity' && activityLogs.map((log, i) => <div key={i} className="p-4 bg-slate-50 rounded-2xl border text-sm font-bold text-slate-800 truncate">{log.humanReadable}</div>)}
-                                    {logTab === 'journal' && journalEntries.map((e, i) => <div key={i} className="p-5 bg-slate-50 border rounded-3xl text-sm italic leading-relaxed text-slate-700">"{e.text}"</div>)}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* JOURNALING MODAL */}
+                    {/* MODALS */}
                     {isJournalOpen && (
-                        <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4">
-                            <div className="bg-white w-full max-w-lg rounded-[3rem] p-10 shadow-2xl space-y-6 animate-fade-in border border-white">
-                                <h2 className="text-2xl font-black tracking-tight">Personal Reflection</h2>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase">This note will be fed to the AI for behavioral analysis.</p>
-                                <textarea value={journalInput} onChange={e => setJournalInput(e.target.value)} className="w-full h-40 p-6 bg-slate-50 rounded-3xl outline-none focus:ring-2 border text-sm leading-relaxed text-slate-700" placeholder="Why was focus difficult today?" />
+                        <div className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4">
+                            <div className="bg-white w-full max-w-lg rounded-[4rem] p-12 shadow-2xl space-y-8 border border-white">
+                                <h2 className="text-3xl font-black">Reflect</h2>
+                                <textarea value={journalInput} onChange={e => setJournalInput(e.target.value)} className="w-full h-48 p-8 bg-slate-50 rounded-[2.5rem] outline-none border focus:ring-4 ring-indigo-50" placeholder="Why was focus difficult today?" />
                                 <div className="flex gap-4">
-                                    <button onClick={() => setIsJournalOpen(false)} className="flex-1 py-4 font-black text-slate-400">Discard</button>
+                                    <button onClick={() => setIsJournalOpen(false)} className="flex-1 font-black text-slate-400">Discard</button>
                                     <button onClick={() => { 
                                         const updated = [{timestamp: new Date().toISOString(), text: journalInput}, ...journalEntries]; 
                                         setJournalEntries(updated); setJournalInput(""); setIsJournalOpen(false); 
                                         save(habits, completions, systemState, logActivity('journal', journalInput.substring(0,15)), updated, conversations); 
-                                    }} className="flex-[2] bg-indigo-600 text-white py-4 rounded-3xl font-black shadow-xl hover:bg-indigo-700 transition-colors">Seal Note</button>
+                                    }} className="flex-[2] bg-indigo-600 text-white py-5 rounded-[2rem] font-black shadow-xl hover:bg-indigo-700 transition-colors text-xs uppercase tracking-widest font-black">Seal Note</button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    <div className="fixed bottom-8 right-8 flex flex-col gap-4">
-                        <button onClick={() => { if(!conversations.length) createNewChat(); setIsAiOpen(true); }} className="w-16 h-16 bg-indigo-600 text-white shadow-2xl rounded-full flex items-center justify-center text-xl hover:scale-110 active:scale-95 transition-all">🧠</button>
-                        <button onClick={() => setIsJournalOpen(true)} className="w-16 h-16 bg-white border border-slate-100 shadow-2xl rounded-full flex items-center justify-center text-xl hover:scale-110 active:scale-95 transition-all">📝</button>
-                        <button onClick={() => setIsLogOpen(true)} className="w-16 h-16 bg-white border border-slate-100 shadow-2xl rounded-full flex items-center justify-center text-xl hover:scale-110 active:scale-95 transition-all">📋</button>
-                    </div>
+                    {isLogOpen && (
+                        <div className="fixed inset-0 z-[120] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-4 md:p-6">
+                            <div className="bg-white w-full max-w-3xl rounded-[4rem] p-10 shadow-2xl relative flex flex-col max-h-[85vh]">
+                                <button onClick={() => setIsLogOpen(false)} className="absolute top-8 right-10 text-slate-400 text-2xl hover:text-slate-600">✕</button>
+                                <h2 className="text-4xl font-black tracking-tighter mb-6 text-center">Master Ledger</h2>
+                                <div className="flex bg-slate-100 p-1.5 rounded-[2rem] mb-8">
+                                    {['integrity', 'activity', 'journal'].map(t => <button key={t} onClick={() => setLogTab(t)} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-[1.5rem] transition-all ${logTab === t ? 'bg-white shadow-md text-indigo-600' : 'text-slate-400'}`}>{t}</button>)}
+                                </div>
+                                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4">
+                                    {logTab === 'integrity' && integrityMetrics.logs.map((l, i) => <div key={i} className="p-6 bg-slate-50 rounded-[2.5rem] border flex justify-between items-center transition-all hover:bg-white"><div className="space-y-1"><div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{l.date} • {l.time}</div><div className="text-sm font-bold text-slate-800">{l.reason}</div></div><div className={`text-sm font-black px-4 py-2 rounded-2xl ${l.type==='plus'?'text-emerald-600 bg-emerald-50':'text-orange-600 bg-orange-50'}`}>{l.points}</div></div>)}
+                                    {logTab === 'activity' && activityLogs.map((log, i) => <div key={i} className="p-5 bg-slate-50 rounded-[2rem] border text-[11px] font-bold text-slate-800 transition-all hover:bg-white">{log.humanReadable}</div>)}
+                                    {logTab === 'journal' && journalEntries.map((e, i) => <div key={i} className="p-8 bg-white border rounded-[3rem] text-sm italic text-slate-700 shadow-sm leading-relaxed">"{e.text}"</div>)}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {isInfoOpen && (
+                        <div className="fixed inset-0 z-[120] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-6">
+                            <div className="bg-white w-full max-w-xl rounded-[4rem] p-12 shadow-2xl space-y-8 animate-fade-in flex flex-col max-h-[90vh]">
+                                <h2 className="text-4xl font-black">System Configuration</h2>
+                                <div className="space-y-6 overflow-y-auto pr-2 custom-scrollbar">
+                                    <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4">
+                                        <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Intelligence Calibration</h4>
+                                        <input type="password" value={systemState.geminiKey} onChange={e => { const ns = {...systemState, geminiKey: e.target.value.trim()}; setSystemState(ns); save(habits, completions, ns, activityLogs, journalEntries, conversations); }} placeholder="Paste Gemini Key" className="w-full p-4 bg-white border rounded-2xl text-xs outline-none focus:ring-4 ring-indigo-100" />
+                                        <textarea value={systemState.geminiPersona} onChange={e => { const ns = {...systemState, geminiPersona: e.target.value}; setSystemState(ns); save(habits, completions, ns, activityLogs, journalEntries, conversations); }} className="w-full p-4 h-32 bg-white border rounded-2xl text-xs outline-none focus:ring-4 ring-indigo-100" />
+                                    </div>
+                                    <div className="p-8 bg-slate-50 rounded-[2.5rem]">
+                                        <h4 className="text-[10px] font-black text-indigo-600 uppercase mb-4 tracking-widest text-center">GMT Offset Calibration</h4>
+                                        <select value={systemState.gmtOffset} onChange={e => { const ns = {...systemState, gmtOffset: parseInt(e.target.value)}; setSystemState(ns); save(habits, completions, ns, activityLogs, journalEntries, conversations); }} className="p-3 w-full rounded-2xl font-bold bg-white border outline-none text-sm">
+                                            {Array.from({length:27}, (_,i)=>i-12).map(o => <option key={o} value={o}>GMT {o>=0?'+':''}{o}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+                                <button onClick={() => setIsInfoOpen(false)} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl">Save & Close</button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         };
