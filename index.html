@@ -21,6 +21,8 @@
 
         // Assign to window for React script to access
         window.FirebaseSDK = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot, collection };
+        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+    
     </script>
 
     <style>
@@ -69,13 +71,15 @@
             const [errorMessage, setErrorMessage] = useState(null);
 
             // --- FIREBASE CONFIG ---
-            const firebaseConfig = window.__firebase_config ? JSON.parse(window.__firebase_config) : {
-                apiKey: "", 
-                authDomain: "",
-                projectId: "",
-                storageBucket: "",
-                messagingSenderId: "",
-                appId: ""
+            // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+            const firebaseConfig = {
+              apiKey: "AIzaSyB1QJOl6qVvhSUxHEeIF_83D4mTksjugfU",
+              authDomain: "coding-b0471.firebaseapp.com",
+              projectId: "coding-b0471",
+              storageBucket: "coding-b0471.firebasestorage.app",
+              messagingSenderId: "313315345242",
+              appId: "1:313315345242:web:ef5c0f972042a89fc3a963",
+              measurementId: "G-ZH8CJF85YM"
             };
 
             const appId = window.__app_id || 'focuslab-habit-tracker';
