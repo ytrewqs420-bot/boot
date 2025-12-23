@@ -100,11 +100,12 @@
 
     <script type="text/babel">
         /**
-         * FOCUSLAB HABIT TRACKER - WITH PERMANENT LOGIN
+         * FOCUSLAB HABIT TRACKER - HYBRID PERSISTENCE (Local + Cloud)
          */
         const App = () => {
             const { useState, useEffect, useMemo } = React;
 
+            const STORAGE_KEY = 'focuslab_local_data_v1';
             const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
             const CATEGORIES = [
                 { label: 'Morning', color: 'text-amber-500', bg: 'bg-amber-50', icon: '🌅' },
@@ -128,7 +129,7 @@
             const [isAdding, setIsAdding] = useState(false);
             const [isProfileOpen, setIsProfileOpen] = useState(false);
             const [newHabit, setNewHabit] = useState({ name: '', icon: '✨', target: 7, category: 'Morning' });
-            const [syncStatus, setSyncStatus] = useState('initializing');
+            const [syncStatus, setSyncStatus] = useState('local'); // 'local' | 'syncing' | 'synced' | 'error'
             const [errorMessage, setErrorMessage] = useState(null);
 
             // --- FIREBASE CONFIG ---
@@ -145,10 +146,9 @@
 
             // --- INITIALIZE SERVICES ---
             const services = useMemo(() => {
-                if (!window.FirebaseSDK) return null;
+                if (!window.FirebaseSDK || !firebaseConfig.apiKey) return null;
                 const { initializeApp, getAuth, getFirestore } = window.FirebaseSDK;
                 try {
-                    if (!firebaseConfig.apiKey) return null;
                     const app = initializeApp(firebaseConfig);
                     return { auth: getAuth(app), db: getFirestore(app) };
                 } catch (e) {
@@ -157,12 +157,25 @@
                 }
             }, []);
 
+            // --- LOCAL STORAGE INITIALIZATION ---
+            useEffect(() => {
+                const localData = localStorage.getItem(STORAGE_KEY);
+                if (localData) {
+                    try {
+                        const parsed = JSON.parse(localData);
+                        setHabits(parsed.habits || DEFAULT_HABITS);
+                        setCompletions(parsed.completions || {});
+                    } catch (e) {
+                        setHabits(DEFAULT_HABITS);
+                    }
+                } else {
+                    setHabits(DEFAULT_HABITS);
+                }
+            }, []);
+
             // --- AUTHENTICATION ---
             useEffect(() => {
-                if (!services) {
-                    setSyncStatus('config_needed');
-                    return;
-                }
+                if (!services) return;
 
                 const { signInWithCustomToken, signInAnonymously, onAuthStateChanged } = window.FirebaseSDK;
 
@@ -170,85 +183,93 @@
                     try {
                         if (window.__initial_auth_token) {
                             await signInWithCustomToken(services.auth, window.__initial_auth_token);
-                        } else {
-                            // Check if there is already a user, otherwise sign in anonymously
-                            // onAuthStateChanged will handle the state update
-                            if (!services.auth.currentUser) {
-                                await signInAnonymously(services.auth);
-                            }
+                        } else if (!services.auth.currentUser) {
+                            await signInAnonymously(services.auth);
                         }
                     } catch (e) {
-                        setErrorMessage("Authentication failed. Check your Firebase console settings.");
-                        setSyncStatus('error');
+                        console.warn("Cloud Auth disabled or failed. Running in Local Mode.");
                     }
                 };
 
                 initAuth();
                 const unsubscribe = onAuthStateChanged(services.auth, (u) => {
                     setUser(u);
-                    if (u) {
-                        setSyncStatus('connecting');
-                        setErrorMessage(null);
-                    } else {
-                        setSyncStatus('initializing');
-                    }
                 });
                 return () => unsubscribe();
             }, [services]);
 
-            // --- DATA SYNC (Rule 1: artifacts/appId/users/userId/data/collection) ---
+            // --- DATA SYNC (Cloud -> Local) ---
             useEffect(() => {
-                if (!user || !services) return;
+                // Only sync from cloud if user is NOT anonymous (is a real Google account)
+                if (!user || user.isAnonymous || !services) return;
+                
                 const { doc, onSnapshot } = window.FirebaseSDK;
                 const dataDocRef = doc(services.db, 'artifacts', appId, 'users', user.uid, 'data', 'habits_v1');
                 
+                setSyncStatus('syncing');
                 const unsubscribe = onSnapshot(dataDocRef, (snap) => {
                     if (snap.exists()) {
                         const data = snap.data();
                         setHabits(data.habits || DEFAULT_HABITS);
                         setCompletions(data.completions || {});
+                        // Update local cache
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                            habits: data.habits,
+                            completions: data.completions
+                        }));
+                        setSyncStatus('synced');
                     } else {
-                        setHabits(DEFAULT_HABITS);
-                        setCompletions({});
+                        // If cloud is empty but local has data, upload local data
+                        const localData = localStorage.getItem(STORAGE_KEY);
+                        if (localData) {
+                            const parsed = JSON.parse(localData);
+                            save(parsed.habits, parsed.completions);
+                        }
+                        setSyncStatus('synced');
                     }
-                    setSyncStatus('synced');
-                    setErrorMessage(null);
                 }, (err) => {
-                    setSyncStatus('error');
-                    setErrorMessage(`Cloud access denied. Ensure Firestore Rules are set for user: ${user.uid}`);
+                    setSyncStatus('local');
+                    console.error("Firestore sync error", err);
                 });
 
                 return () => unsubscribe();
             }, [user, services]);
 
             const save = async (h, c) => {
-                if (!user || !services) return;
-                const { doc, setDoc } = window.FirebaseSDK;
-                setSyncStatus('syncing');
-                try {
-                    const dataDocRef = doc(services.db, 'artifacts', appId, 'users', user.uid, 'data', 'habits_v1');
-                    await setDoc(dataDocRef, { 
-                        habits: h, 
-                        completions: c, 
-                        updated: new Date().toISOString() 
-                    }, { merge: true });
-                    setSyncStatus('synced');
-                } catch (e) { 
-                    setSyncStatus('error'); 
-                    setErrorMessage("Save failed. Connection error.");
+                // 1. Save to Local Storage (Always)
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({ habits: h, completions: c }));
+                
+                // 2. Save to Cloud (If logged in and not anonymous)
+                if (user && !user.isAnonymous && services) {
+                    const { doc, setDoc } = window.FirebaseSDK;
+                    setSyncStatus('syncing');
+                    try {
+                        const dataDocRef = doc(services.db, 'artifacts', appId, 'users', user.uid, 'data', 'habits_v1');
+                        await setDoc(dataDocRef, { 
+                            habits: h, 
+                            completions: c, 
+                            updated: new Date().toISOString() 
+                        }, { merge: true });
+                        setSyncStatus('synced');
+                    } catch (e) { 
+                        setSyncStatus('local'); 
+                    }
                 }
             };
 
             // --- LOGIN / LOGOUT ACTIONS ---
             const handleGoogleLogin = async () => {
-                if (!services) return;
+                if (!services) {
+                    alert("Firebase Config missing. Please check your setup.");
+                    return;
+                }
                 const { GoogleAuthProvider, signInWithPopup } = window.FirebaseSDK;
                 const provider = new GoogleAuthProvider();
                 try {
                     setIsProfileOpen(false);
                     await signInWithPopup(services.auth, provider);
                 } catch (e) {
-                    setErrorMessage("Login cancelled or failed.");
+                    setErrorMessage("Login failed. Please try again.");
                 }
             };
 
@@ -258,7 +279,6 @@
                 try {
                     setIsProfileOpen(false);
                     await signOut(services.auth);
-                    // Automatically return to anonymous session
                     await signInAnonymously(services.auth);
                 } catch (e) {
                     console.error("Logout error", e);
@@ -312,19 +332,6 @@
                 return Math.round((done / (habits.length * 7)) * 100);
             }, [habits, completions]);
 
-            // --- UI STATES ---
-            if (syncStatus === 'config_needed') {
-                return (
-                    <div className="h-screen flex items-center justify-center p-8 bg-slate-50">
-                        <div className="max-w-md w-full glass-card p-10 rounded-[3rem] shadow-2xl text-center space-y-6 border border-white">
-                            <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto text-3xl font-black">!</div>
-                            <h2 className="text-2xl font-black tracking-tight">Setup Required</h2>
-                            <p className="text-slate-500 text-sm leading-relaxed">Paste your Firebase Config into <code>index.html</code> to enable the login and cloud sync features.</p>
-                        </div>
-                    </div>
-                );
-            }
-
             return (
                 <div className="pb-10 animate-in fade-in duration-700">
                     {/* MOBILE TOP BAR */}
@@ -332,8 +339,8 @@
                         <div className="flex justify-between items-center">
                             <h1 className="text-xl font-black tracking-tighter">Ritual <span className="text-indigo-600">Design</span></h1>
                             <div className="flex items-center gap-3">
-                                <div className={`text-[8px] px-2 py-0.5 rounded-full font-bold uppercase ${syncStatus === 'synced' ? 'text-emerald-500' : 'text-indigo-400'}`}>
-                                    {syncStatus}
+                                <div className={`text-[8px] px-2 py-0.5 rounded-full font-bold uppercase ${syncStatus === 'synced' ? 'text-emerald-500' : 'text-slate-400'}`}>
+                                    {syncStatus === 'local' ? 'Saved Locally' : syncStatus}
                                 </div>
                                 <button onClick={() => setIsProfileOpen(!isProfileOpen)} className="w-8 h-8 rounded-full bg-slate-100 overflow-hidden border border-slate-200">
                                     {user?.photoURL ? <img src={user.photoURL} alt="Profile" /> : <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-slate-400">?</div>}
@@ -349,6 +356,9 @@
                                 <div className="flex items-center gap-2 mb-1">
                                     <div className="h-1.5 w-6 bg-indigo-600 rounded-full"></div>
                                     <span className="text-[10px] font-black tracking-widest uppercase text-indigo-600">FocusLab Ecosystem</span>
+                                    <span className={`ml-2 text-[8px] px-2 py-0.5 rounded-full font-bold uppercase bg-slate-100 text-slate-400`}>
+                                        {syncStatus === 'local' ? 'Persistent Local Storage' : 'Cloud ' + syncStatus}
+                                    </span>
                                 </div>
                                 <h1 className="text-5xl font-black tracking-tighter">Ritual <span className="text-slate-300 font-medium">Design</span></h1>
                             </div>
@@ -363,7 +373,6 @@
                                     <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() + 1)))} className="p-2.5 hover:bg-slate-50 rounded-full transition-all">→</button>
                                 </div>
 
-                                {/* USER PROFILE DROPDOWN */}
                                 <div className="relative">
                                     <button 
                                         onClick={() => setIsProfileOpen(!isProfileOpen)}
@@ -373,8 +382,8 @@
                                             {user?.photoURL ? <img src={user.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-indigo-600 font-black">F</div>}
                                         </div>
                                         <div className="text-left">
-                                            <div className="text-[10px] font-black uppercase text-slate-400 leading-none mb-1">Identity</div>
-                                            <div className="text-xs font-bold text-slate-800 leading-none">{user?.displayName || (user?.isAnonymous ? 'Temporary' : 'User')}</div>
+                                            <div className="text-[10px] font-black uppercase text-slate-400 leading-none mb-1">Storage</div>
+                                            <div className="text-xs font-bold text-slate-800 leading-none">{user?.displayName || 'Browser Cache'}</div>
                                         </div>
                                     </button>
 
@@ -382,18 +391,18 @@
                                         <div className="absolute right-0 mt-3 w-64 bg-white rounded-[2rem] shadow-2xl border border-slate-100 p-6 z-[60] profile-menu animate-in zoom-in-95 duration-200">
                                             <div className="space-y-4">
                                                 <div className="pb-4 border-b border-slate-50">
-                                                    <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Status</div>
-                                                    <div className={`text-sm font-bold ${user?.isAnonymous ? 'text-amber-500' : 'text-emerald-500'}`}>
-                                                        {user?.isAnonymous ? 'Temporary Session' : 'Permanent Account'}
+                                                    <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Identity</div>
+                                                    <div className={`text-sm font-bold ${(!user || user?.isAnonymous) ? 'text-amber-500' : 'text-emerald-500'}`}>
+                                                        {(!user || user?.isAnonymous) ? 'Browser Only' : 'Google Protected'}
                                                     </div>
                                                 </div>
                                                 
-                                                {user?.isAnonymous ? (
+                                                {(!user || user?.isAnonymous) ? (
                                                     <button 
                                                         onClick={handleGoogleLogin}
                                                         className="w-full bg-indigo-600 text-white py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
                                                     >
-                                                        Login with Google
+                                                        Login to Cloud
                                                     </button>
                                                 ) : (
                                                     <button 
@@ -403,8 +412,8 @@
                                                         Sign Out
                                                     </button>
                                                 )}
-                                                <p className="text-[9px] text-slate-300 text-center leading-relaxed">
-                                                    {user?.isAnonymous ? "Login to sync rituals across all your devices permanently." : "Logged in as " + user?.email}
+                                                <p className="text-[9px] text-slate-400 text-center leading-relaxed">
+                                                    {(!user || user?.isAnonymous) ? "Your data is saved to this browser. Login to sync across all devices." : "Your rituals are safely backed up to your Google account."}
                                                 </p>
                                             </div>
                                         </div>
@@ -413,19 +422,19 @@
                             </div>
                         </header>
 
-                        {/* MOBILE PROFILE DRAWER SIMULATION */}
+                        {/* MOBILE PROFILE DRAWER */}
                         {isProfileOpen && (
                             <div className="md:hidden fixed inset-0 z-[100] flex items-end">
                                 <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsProfileOpen(false)}></div>
                                 <div className="relative w-full bg-white rounded-t-[3rem] p-8 space-y-6 shadow-2xl animate-in slide-in-from-bottom duration-300">
                                     <div className="w-12 h-1 bg-slate-100 rounded-full mx-auto"></div>
                                     <div>
-                                        <h2 className="text-2xl font-black tracking-tight mb-2">My Identity</h2>
-                                        <p className="text-slate-400 text-sm">{user?.isAnonymous ? "You are using a temporary session." : "You are logged in via Google."}</p>
+                                        <h2 className="text-2xl font-black tracking-tight mb-2">Storage Status</h2>
+                                        <p className="text-slate-400 text-sm">{(!user || user?.isAnonymous) ? "Data is currently stored only in this browser's cache." : "Data is backed up to " + user?.email}</p>
                                     </div>
                                     <div className="flex flex-col gap-3">
-                                        {user?.isAnonymous ? (
-                                            <button onClick={handleGoogleLogin} className="bg-indigo-600 text-white py-4 rounded-2xl font-black uppercase text-xs tracking-widest">Login with Google</button>
+                                        {(!user || user?.isAnonymous) ? (
+                                            <button onClick={handleGoogleLogin} className="bg-indigo-600 text-white py-4 rounded-2xl font-black uppercase text-xs tracking-widest">Connect Google</button>
                                         ) : (
                                             <button onClick={handleLogout} className="bg-slate-50 text-slate-500 py-4 rounded-2xl font-black uppercase text-xs tracking-widest">Sign Out</button>
                                         )}
@@ -449,7 +458,7 @@
                                 </div>
                                 <div>
                                     <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Monthly Velocity</h3>
-                                    <p className="text-xs text-slate-500 mt-1 font-medium">Overall consistency for {MONTHS[currentDate.getMonth()]}.</p>
+                                    <p className="text-xs text-slate-500 mt-1 font-medium">Progress for {MONTHS[currentDate.getMonth()]}.</p>
                                 </div>
                             </div>
 
