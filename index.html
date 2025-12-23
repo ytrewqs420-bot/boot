@@ -39,7 +39,7 @@
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         .sticky-col { position: sticky; left: 0; z-index: 40; background: white; box-shadow: 4px 0 10px -2px rgba(0,0,0,0.05); }
         .integrity-gradient { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); }
-        .check-anim { transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        .check-anim { transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
         .check-anim:active { transform: scale(0.85); }
         .urgent-pulse { animation: borderPulse 2s infinite; }
         @keyframes borderPulse { 0%, 100% { border-color: #ef4444; box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.2); } 50% { border-color: #fee2e2; box-shadow: 0 0 15px 5px rgba(239, 68, 68, 0.1); } }
@@ -67,8 +67,8 @@
             { id: '4', name: 'Reading', icon: '📖', category: 'Evening', priority: 'support', limit: 24 }
         ];
 
-        const DEFAULT_PERSONA = "You are the 'Mindful Architect,' a grounded mentor for FocusLab. Integrity is math: $I = \\frac{\\sum Actions}{\\sum Promises}$. If I skip a ritual, curiously investigate the friction. Use Markdown and LaTeX.";
-        const STORAGE_KEY = 'focuslab_v3.6_gemini2.5_final';
+        const DEFAULT_PERSONA = "You are the 'Mindful Architect,' a grounded mentor for FocusLab. Integrity is math: $I = \\frac{\\sum Actions}{\\sum Promises}$. If I skip a ritual, curiously investigate the friction using my journal notes. Use Markdown and LaTeX.";
+        const STORAGE_KEY = 'focuslab_v3.8_final_journal';
         const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
         // --- COMPONENTS ---
@@ -108,7 +108,7 @@
             const [isAdding, setIsAdding] = useState(false);
             const [isInfoOpen, setIsInfoOpen] = useState(false);
             const [isLogOpen, setIsLogOpen] = useState(false);
-            const [logTab, setLogTab] = useState('integrity');
+            const [logTab, setLogTab] = useState('journal');
             const [isAiOpen, setIsAiOpen] = useState(false);
             const [isJournalOpen, setIsJournalOpen] = useState(false);
             const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
@@ -120,7 +120,6 @@
             });
             const [time, setTime] = useState(new Date());
 
-            // --- SERVICES ---
             const services = useMemo(() => {
                 if (!window.FirebaseSDK) return null;
                 const { initializeApp, getAuth, getFirestore } = window.FirebaseSDK;
@@ -128,14 +127,10 @@
                 if (!config) return null;
                 try {
                     const app = initializeApp(config);
-                    const auth = getAuth(app);
-                    const db = getFirestore(app);
-                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'focuslab-v1';
-                    return { auth, db, appId };
+                    return { auth: getAuth(app), db: getFirestore(app), appId: typeof __app_id !== 'undefined' ? __app_id : 'focuslab-v1' };
                 } catch (e) { return null; }
             }, []);
 
-            // --- LOGIC ENGINE ---
             const adjustedTime = useMemo(() => {
                 const utc = time.getTime() + (time.getTimezoneOffset() * 60000);
                 return new Date(utc + (3600000 * systemState.gmtOffset));
@@ -152,9 +147,7 @@
                     try { 
                         const { doc, setDoc } = window.FirebaseSDK;
                         await setDoc(doc(services.db, 'artifacts', services.appId, 'users', user.uid, 'data', 'behavioral_v3'), payload, { merge: true }); 
-                    } catch (e) {
-                        console.error("Save error:", e);
-                    }
+                    } catch (e) {}
                 }
             };
 
@@ -165,7 +158,7 @@
                 return updated;
             };
 
-            // --- GEMINI 2.5 FLASH AI ENGINE ---
+            // --- AI LOGIC ---
             const callGemini = async (prompt, currentMessages) => {
                 const apiKey = systemState.geminiKey;
                 if (!apiKey) {
@@ -174,20 +167,10 @@
                 }
                 
                 setIsAiLoading(true);
-                const recentJournals = journalEntries.slice(0, 5).map(j => `[${new Date(j.timestamp).toLocaleDateString()}]: ${j.text}`).join('\n');
-                
-                const systemPrompt = `${systemState.geminiPersona}
-                
-                USER CONTEXT:
-                - Integrity Quotient: ${integrityMetrics.pts}pts
-                - Status: ${integrityMetrics.title}
-                - Ritual Matrix: ${JSON.stringify(habits)}
-                - Recent Behavioral Logs: ${JSON.stringify(activityLogs.slice(0, 5))}
-                - Subjective Journals:
-                ${recentJournals || "No reflections recorded."}`;
+                const recentJournals = journalEntries.slice(0, 5).map(j => `[Reflected on ${new Date(j.timestamp).toLocaleDateString()}]: ${j.text}`).join('\n');
+                const systemPrompt = `${systemState.geminiPersona}\n\nUSER DATA:\nIntegrity: ${integrityMetrics.pts}pts\nRecent Journals:\n${recentJournals || "No journals yet."}`;
                 
                 try {
-                    // Use gemini-2.5-flash-preview-09-2025 as the model string
                     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -205,16 +188,10 @@
                             ]
                         })
                     });
-                    
                     const data = await res.json();
                     if (data.error) throw new Error(data.error.message);
-
-                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "The architect remains silent. Try rephrasing.";
-                    const updated = conversations.map(c => c.id === activeChatId ? { 
-                        ...c, 
-                        messages: [...c.messages, { role: 'assistant', text }], 
-                        lastUpdated: new Date().toISOString() 
-                    } : c);
+                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "Reflection silent.";
+                    const updated = conversations.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, { role: 'assistant', text }], lastUpdated: new Date().toISOString() } : c);
                     setConversations(updated);
                     save(habits, completions, systemState, activityLogs, journalEntries, updated);
                 } catch (e) {
@@ -237,16 +214,17 @@
             };
 
             const createNewChat = () => {
-                const newChat = { id: Date.now().toString(), title: `Chat ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`, messages: [{ role: 'assistant', text: "Adviser present. I've analyzed your journals and rituals. Where is the friction today?" }], lastUpdated: new Date().toISOString() };
+                const newChat = { id: Date.now().toString(), title: `Chat ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`, messages: [{ role: 'assistant', text: "Adviser present. I've calibrated your latest behavioral data. How shall we begin?" }], lastUpdated: new Date().toISOString() };
                 const updated = [newChat, ...conversations]; setConversations(updated); setActiveChatId(newChat.id);
                 save(habits, completions, systemState, activityLogs, journalEntries, updated);
             };
 
-            const deleteChat = (id) => {
-                const updated = conversations.filter(c => c.id !== id);
-                setConversations(updated);
-                if (activeChatId === id) setActiveChatId(updated[0]?.id || null);
-                save(habits, completions, systemState, activityLogs, journalEntries, updated);
+            const deleteJournalEntry = (timestamp) => {
+                if (!confirm("Permanently erase this reflection from your timeline?")) return;
+                const updated = journalEntries.filter(e => e.timestamp !== timestamp);
+                setJournalEntries(updated);
+                logActivity('delete_journal', 'Entry Removed');
+                save(habits, completions, systemState, activityLogs, updated, conversations);
             };
 
             // --- ANALYTICS ---
@@ -264,16 +242,6 @@
                 const progress = nextTier === currentTier ? 100 : ((pts - currentTier.m) / (nextTier.m - currentTier.m)) * 100;
                 return { pts, title: currentTier.t, nextTier: nextTier.t, progress, logs };
             }, [habits, completions]);
-
-            const getStreak = (hid) => {
-                let streak = 0; let d = new Date(adjustedTime);
-                while(true) {
-                    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}-${hid}`;
-                    if (completions[key] && !completions[key].isLate) { streak++; d.setUTCDate(d.getUTCDate() - 1); }
-                    else break;
-                }
-                return streak;
-            };
 
             const isCommitted = systemState.lastCommit === todayKey;
 
@@ -346,18 +314,18 @@
                                 setSystemState(ns); save(habits, completions, ns, logActivity('commit', todayKey), journalEntries, conversations);
                             }} className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black shadow-xl hover:scale-105 transition-all">Seal Today</button>}
                         </div>
-                        <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border flex flex-col justify-center items-center group">
+                        <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border flex flex-col justify-center items-center group text-center">
                             <div className="text-7xl font-black tracking-tighter group-hover:text-indigo-600 transition-colors">{integrityMetrics.pts}</div>
-                            <div className="text-[10px] font-black uppercase text-slate-400 mt-2 tracking-[0.2em]">Honesty Quotient</div>
+                            <div className="text-[10px] font-black uppercase text-slate-400 mt-2 tracking-[0.2em]">Integrity Points</div>
                         </div>
-                        <div className="bg-indigo-600 p-8 rounded-[3.5rem] shadow-xl text-white flex flex-col justify-between relative overflow-hidden">
+                        <div className="bg-indigo-600 p-8 rounded-[3.5rem] shadow-xl text-white flex flex-col justify-between overflow-hidden relative">
                             <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl" />
-                            <p className="text-sm font-medium opacity-90 italic z-10">"Behavior is the only truth."</p>
+                            <p className="text-sm font-medium opacity-90 italic z-10">"Discipline is freedom."</p>
                             <button onClick={() => setIsJournalOpen(true)} className="w-full py-4 bg-white text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-50 transition-all z-10">New Reflection 📝</button>
                         </div>
                     </section>
 
-                    {/* RITUAL GRID */}
+                    {/* GRID */}
                     <div className={`bg-white rounded-[4rem] shadow-2xl border border-slate-100 overflow-hidden transition-all duration-700 ${!isCommitted ? 'opacity-20 blur-md pointer-events-none' : ''}`}>
                         <div className="overflow-x-auto custom-scrollbar">
                             <table className="w-full border-collapse">
@@ -370,35 +338,24 @@
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-50">
-                                    {habits.map(h => {
-                                        const streak = getStreak(h.id);
-                                        return (
-                                            <tr key={h.id} className="group hover:bg-slate-50/10 transition-colors">
-                                                <td className="sticky-col p-8">
-                                                    <div className="flex flex-col gap-1">
-                                                        <div className="flex items-center gap-3">
-                                                            <span className="text-2xl">{h.icon}</span>
-                                                            <div className="font-bold text-base text-slate-800">{h.name}</div>
-                                                            {streak > 2 && <span className="text-[10px] font-black text-orange-500">{streak}🔥</span>}
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                {Array.from({length:31}, (_,i)=>i+1).map(day => {
-                                                    const key = `${viewDate.getFullYear()}-${String(viewDate.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}-${h.id}`;
-                                                    const isDone = completions[key];
-                                                    const isT = day === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth();
-                                                    return (
-                                                        <td key={day} className={`p-2 text-center ${isT ? 'bg-indigo-50/10' : ''}`}>
-                                                            <button onClick={() => {
-                                                                const newC = {...completions}; if(newC[key]) delete newC[key]; else newC[key] = {timestamp: adjustedTime.toISOString(), isLate: !isT};
-                                                                setCompletions(newC); save(habits, newC, systemState, logActivity('toggle', h.name), journalEntries, conversations);
-                                                            }} className={`check-anim w-12 h-12 rounded-2xl flex items-center justify-center mx-auto transition-all ${isDone ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-50 text-slate-200 hover:bg-slate-100'}`}>{isDone ? '✓' : '•'}</button>
-                                                        </td>
-                                                    );
-                                                })}
-                                            </tr>
-                                        );
-                                    })}
+                                    {habits.map(h => (
+                                        <tr key={h.id} className="group hover:bg-slate-50/10 transition-colors">
+                                            <td className="sticky-col p-8 font-bold text-base text-slate-800">{h.icon} {h.name}</td>
+                                            {Array.from({length:31}, (_,i)=>i+1).map(day => {
+                                                const key = `${viewDate.getFullYear()}-${String(viewDate.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}-${h.id}`;
+                                                const isDone = completions[key];
+                                                const isT = day === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth();
+                                                return (
+                                                    <td key={day} className={`p-2 text-center ${isT ? 'bg-indigo-50/10' : ''}`}>
+                                                        <button onClick={() => {
+                                                            const newC = {...completions}; if(newC[key]) delete newC[key]; else newC[key] = {timestamp: adjustedTime.toISOString(), isLate: !isT};
+                                                            setCompletions(newC); save(habits, newC, systemState, logActivity('toggle', h.name), journalEntries, conversations);
+                                                        }} className={`check-anim w-12 h-12 rounded-2xl flex items-center justify-center mx-auto transition-all ${isDone ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-50 text-slate-200 hover:bg-slate-100'}`}>{isDone ? '✓' : '•'}</button>
+                                                    </td>
+                                                );
+                                            })}
+                                        </tr>
+                                    ))}
                                 </tbody>
                             </table>
                         </div>
@@ -429,16 +386,43 @@
                                             <button onClick={() => setIsSidebarOpen(true)} className="md:hidden bg-white/20 p-2 rounded-xl">≡</button>
                                             <h2 className="text-2xl font-black tracking-tight">{activeChat?.title || "Mindful Adviser"}</h2>
                                         </div>
-                                        <button onClick={() => setIsAiOpen(false)} className="bg-white/20 p-3 rounded-full hover:bg-white/30">✕</button>
+                                        <button onClick={() => setIsAiOpen(false)} className="bg-white/20 p-3 rounded-full">✕</button>
                                     </div>
                                     <div className="flex-1 overflow-y-auto p-6 md:p-10 space-y-6 custom-scrollbar bg-slate-50/30">
                                         {activeChat?.messages.map((m, i) => <AiMessage key={i} text={m.text} role={m.role} />)}
                                         {isAiLoading && <div className="text-[10px] font-black text-indigo-400 animate-pulse uppercase tracking-widest">Architect is reasoning...</div>}
                                     </div>
                                     <div className="p-6 md:p-8 border-t flex gap-4 bg-white shrink-0">
-                                        <input value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAiSend()} className="flex-1 bg-slate-50 p-5 rounded-3xl text-sm outline-none border focus:border-indigo-200" placeholder="Type query..." />
+                                        <input value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAiSend()} className="flex-1 bg-slate-50 p-5 rounded-3xl text-sm outline-none border focus:border-indigo-200" placeholder="Ask the Adviser..." />
                                         <button onClick={handleAiSend} className="bg-slate-900 text-white px-8 rounded-3xl font-black">→</button>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* MINIMALIST JOURNAL MODAL */}
+                    {isJournalOpen && (
+                        <div className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+                            <div className="bg-white w-full max-w-2xl rounded-[4rem] p-12 shadow-2xl border border-white space-y-8">
+                                <div className="text-center space-y-2">
+                                    <h2 className="text-4xl font-black tracking-tighter">Daily Reflection</h2>
+                                    <p className="text-slate-400 font-bold text-xs uppercase tracking-[0.2em]">Record the subjective truth of your day.</p>
+                                </div>
+                                <textarea 
+                                    value={journalInput} 
+                                    onChange={e => setJournalInput(e.target.value)} 
+                                    className="w-full h-64 p-8 bg-slate-50 rounded-[3rem] outline-none border focus:ring-4 ring-indigo-50 text-slate-800 leading-relaxed text-base shadow-inner" 
+                                    placeholder="What blocked your resolve today? What was your greatest win?" 
+                                />
+                                <div className="flex gap-4">
+                                    <button onClick={() => setIsJournalOpen(false)} className="flex-1 py-5 font-black text-slate-400 uppercase text-xs tracking-widest">Discard</button>
+                                    <button onClick={() => { 
+                                        const entry = { timestamp: new Date().toISOString(), text: journalInput };
+                                        const updated = [entry, ...journalEntries]; 
+                                        setJournalEntries(updated); setJournalInput(""); setIsJournalOpen(false); 
+                                        save(habits, completions, systemState, logActivity('journal', 'Entry Sealed'), updated, conversations); 
+                                    }} className="flex-[2] bg-indigo-600 text-white py-5 rounded-[2.5rem] font-black shadow-xl hover:bg-indigo-700 transition-all uppercase text-xs tracking-widest">Seal Note</button>
                                 </div>
                             </div>
                         </div>
@@ -449,7 +433,7 @@
                         <div className="flex flex-col items-end gap-3 mb-4 pointer-events-none group-hover:pointer-events-auto">
                             <button onClick={() => { if(!conversations.length) createNewChat(); setIsAiOpen(true); }} className="fab-menu-item w-14 h-14 bg-indigo-600 text-white rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-indigo-700 pointer-events-auto">🧠</button>
                             <button onClick={() => setIsJournalOpen(true)} className="fab-menu-item w-14 h-14 bg-white border text-slate-700 rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-slate-50 pointer-events-auto">📝</button>
-                            <button onClick={() => { setLogOpen(true); setLogTab('integrity'); }} className="fab-menu-item w-14 h-14 bg-white border text-slate-700 rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-slate-50 pointer-events-auto">📋</button>
+                            <button onClick={() => setIsLogOpen(true)} className="fab-menu-item w-14 h-14 bg-white border text-slate-700 rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-slate-50 pointer-events-auto">📋</button>
                             <button onClick={() => setIsInfoOpen(true)} className="fab-menu-item w-14 h-14 bg-white border text-slate-700 rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-slate-50 pointer-events-auto">⚙️</button>
                         </div>
                         <button className="w-16 h-16 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center transition-transform duration-300 group-hover:rotate-45">
@@ -457,36 +441,30 @@
                         </button>
                     </div>
 
-                    {/* MODALS */}
-                    {isJournalOpen && (
-                        <div className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4">
-                            <div className="bg-white w-full max-w-lg rounded-[4rem] p-12 shadow-2xl space-y-8 border border-white">
-                                <h2 className="text-3xl font-black">Reflect</h2>
-                                <textarea value={journalInput} onChange={e => setJournalInput(e.target.value)} className="w-full h-48 p-8 bg-slate-50 rounded-[2.5rem] outline-none border focus:ring-4 ring-indigo-50" placeholder="Why was focus difficult today?" />
-                                <div className="flex gap-4">
-                                    <button onClick={() => setIsJournalOpen(false)} className="flex-1 font-black text-slate-400">Discard</button>
-                                    <button onClick={() => { 
-                                        const updated = [{timestamp: new Date().toISOString(), text: journalInput}, ...journalEntries]; 
-                                        setJournalEntries(updated); setJournalInput(""); setIsJournalOpen(false); 
-                                        save(habits, completions, systemState, logActivity('journal', journalInput.substring(0,15)), updated, conversations); 
-                                    }} className="flex-[2] bg-indigo-600 text-white py-5 rounded-[2rem] font-black shadow-xl hover:bg-indigo-700 transition-colors text-xs uppercase tracking-widest font-black">Seal Note</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
+                    {/* LEDGER MODAL WITH DELETE OPTION */}
                     {isLogOpen && (
                         <div className="fixed inset-0 z-[120] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-4 md:p-6">
                             <div className="bg-white w-full max-w-3xl rounded-[4rem] p-10 shadow-2xl relative flex flex-col max-h-[85vh]">
                                 <button onClick={() => setIsLogOpen(false)} className="absolute top-8 right-10 text-slate-400 text-2xl hover:text-slate-600">✕</button>
-                                <h2 className="text-4xl font-black tracking-tighter mb-6 text-center">Master Ledger</h2>
-                                <div className="flex bg-slate-100 p-1.5 rounded-[2rem] mb-8">
+                                <h2 className="text-4xl font-black tracking-tighter mb-6 text-center text-slate-900">Intelligence Ledger</h2>
+                                <div className="flex bg-slate-100 p-1.5 rounded-[2rem] mb-8 shrink-0">
                                     {['integrity', 'activity', 'journal'].map(t => <button key={t} onClick={() => setLogTab(t)} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-[1.5rem] transition-all ${logTab === t ? 'bg-white shadow-md text-indigo-600' : 'text-slate-400'}`}>{t}</button>)}
                                 </div>
                                 <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4">
                                     {logTab === 'integrity' && integrityMetrics.logs.map((l, i) => <div key={i} className="p-6 bg-slate-50 rounded-[2.5rem] border flex justify-between items-center transition-all hover:bg-white"><div className="space-y-1"><div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{l.date} • {l.time}</div><div className="text-sm font-bold text-slate-800">{l.reason}</div></div><div className={`text-sm font-black px-4 py-2 rounded-2xl ${l.type==='plus'?'text-emerald-600 bg-emerald-50':'text-orange-600 bg-orange-50'}`}>{l.points}</div></div>)}
                                     {logTab === 'activity' && activityLogs.map((log, i) => <div key={i} className="p-5 bg-slate-50 rounded-[2rem] border text-[11px] font-bold text-slate-800 transition-all hover:bg-white">{log.humanReadable}</div>)}
-                                    {logTab === 'journal' && journalEntries.map((e, i) => <div key={i} className="p-8 bg-white border rounded-[3rem] text-sm italic text-slate-700 shadow-sm leading-relaxed">"{e.text}"</div>)}
+                                    {logTab === 'journal' && journalEntries.map((e, i) => (
+                                        <div key={i} className="bg-white border border-slate-100 p-8 rounded-[3rem] shadow-sm relative group animate-fade-in mb-4">
+                                            <div className="flex justify-between items-start mb-4">
+                                                <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{new Date(e.timestamp).toLocaleString()}</span>
+                                                <button onClick={() => deleteJournalEntry(e.timestamp)} className="text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                                </button>
+                                            </div>
+                                            <p className="text-sm text-slate-700 leading-relaxed italic border-l-4 border-slate-50 pl-6">"{e.text}"</p>
+                                        </div>
+                                    ))}
+                                    {logTab === 'journal' && journalEntries.length === 0 && <div className="text-center py-20 text-slate-300 font-medium italic">Empty reflections.</div>}
                                 </div>
                             </div>
                         </div>
@@ -495,10 +473,10 @@
                     {isInfoOpen && (
                         <div className="fixed inset-0 z-[120] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-6">
                             <div className="bg-white w-full max-w-xl rounded-[4rem] p-12 shadow-2xl space-y-8 animate-fade-in flex flex-col max-h-[90vh]">
-                                <h2 className="text-4xl font-black">System Configuration</h2>
+                                <h2 className="text-4xl font-black tracking-tighter">Configuration</h2>
                                 <div className="space-y-6 overflow-y-auto pr-2 custom-scrollbar">
                                     <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4">
-                                        <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Intelligence Calibration</h4>
+                                        <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Intelligence Setup</h4>
                                         <input type="password" value={systemState.geminiKey} onChange={e => { const ns = {...systemState, geminiKey: e.target.value.trim()}; setSystemState(ns); save(habits, completions, ns, activityLogs, journalEntries, conversations); }} placeholder="Paste Gemini Key" className="w-full p-4 bg-white border rounded-2xl text-xs outline-none focus:ring-4 ring-indigo-100" />
                                         <textarea value={systemState.geminiPersona} onChange={e => { const ns = {...systemState, geminiPersona: e.target.value}; setSystemState(ns); save(habits, completions, ns, activityLogs, journalEntries, conversations); }} className="w-full p-4 h-32 bg-white border rounded-2xl text-xs outline-none focus:ring-4 ring-indigo-100" />
                                     </div>
@@ -509,7 +487,7 @@
                                         </select>
                                     </div>
                                 </div>
-                                <button onClick={() => setIsInfoOpen(false)} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl">Save & Close</button>
+                                <button onClick={() => setIsInfoOpen(false)} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl">Close</button>
                             </div>
                         </div>
                     )}
