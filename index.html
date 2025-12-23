@@ -54,6 +54,10 @@
             box-shadow: 4px 4px 12px rgba(0,0,0,0.08), inset 0 1px 1px rgba(255,255,255,0.6);
             transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             border-bottom-right-radius: 40px 5px;
+            position: relative;
+        }
+        .dashboard-sticky-reminder {
+            background: linear-gradient(135deg, #fce4ec 0%, #f8bbd0 100%);
         }
         .dashboard-sticky:hover {
             transform: scale(1.05) rotate(0deg) !important;
@@ -89,8 +93,8 @@
             { id: '4', name: 'Reading', icon: '📖', category: 'Evening', limit: 24, prompt: 'What insight did you gain?' }
         ];
 
-        const DEFAULT_PERSONA = "You are the 'Mindful Architect,' a grounded mentor for FocusLab. Integrity is math: $I = \\frac{\\sum Actions}{\\sum Promises}$. Analyze behavioral logs, sticky notes, and habit-specific answers to find why I fail. Use Markdown and LaTeX.";
-        const STORAGE_KEY = 'focuslab_v4.6_behavioral_prompts';
+        const DEFAULT_PERSONA = "You are the 'Mindful Architect,' a grounded mentor for FocusLab. Integrity is math: $I = \\frac{\\sum Actions}{\\sum Promises}$. Analyze behavioral logs, dashboard stickies, reminders, and habit-specific answers to find why I fail. Use Markdown and LaTeX.";
+        const STORAGE_KEY = 'focuslab_v4.7_reminders';
         const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
         const AiMessage = ({ text, role }) => {
@@ -123,6 +127,7 @@
             const [completions, setCompletions] = useState({});
             const [activityLogs, setActivityLogs] = useState([]);
             const [journalEntries, setJournalEntries] = useState([]); 
+            const [reminders, setReminders] = useState([]); // New Reminders State
             const [conversations, setConversations] = useState([]);
             const [quotes, setQuotes] = useState(["Your word is your bond.", "Behavior is the only truth."]);
             const [activeChatId, setActiveChatId] = useState(null);
@@ -137,6 +142,9 @@
             const [isAiOpen, setIsAiOpen] = useState(false);
             const [isJournalOpen, setIsJournalOpen] = useState(false);
             const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
+            
+            // Note Capture Modal State
+            const [noteType, setNoteType] = useState('reflection'); // 'reflection' or 'reminder'
             
             // Prompt Feature State
             const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
@@ -176,8 +184,8 @@
             const isCommitted = useMemo(() => systemState.lastCommit === todayKey, [systemState.lastCommit, todayKey]);
             const activeChat = useMemo(() => conversations.find(c => c.id === activeChatId), [conversations, activeChatId]);
 
-            const save = async (h, c, s, logs, journal, chats, q) => {
-                const payload = { habits: h, completions: c, systemState: s, activityLogs: logs, journalEntries: journal, conversations: chats, quotes: q };
+            const save = async (h, c, s, logs, journal, chats, q, r) => {
+                const payload = { habits: h, completions: c, systemState: s, activityLogs: logs, journalEntries: journal, conversations: chats, quotes: q, reminders: r };
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
                 if (user && !user.isAnonymous && services) {
                     try { 
@@ -200,15 +208,15 @@
                 if (!apiKey) return;
                 setIsAiLoading(true);
                 const recentJournals = journalEntries.slice(0, 5).map(j => j.text).join('\n');
+                const activeReminders = reminders.map(r => r.text).join('\n');
                 
-                // Add completion prompts to AI context
                 const ritualResponses = Object.keys(completions)
                     .filter(k => completions[k].answer)
                     .slice(-10)
                     .map(k => `[Habit Response]: ${completions[k].answer}`)
                     .join('\n');
 
-                const systemPrompt = `${systemState.geminiPersona}\n\nUSER DATA:\nIntegrity: ${integrityMetrics.pts}pts\nJournal Notes:\n${recentJournals}\nBehavioral Responses:\n${ritualResponses}`;
+                const systemPrompt = `${systemState.geminiPersona}\n\nUSER DATA:\nIntegrity: ${integrityMetrics.pts}pts\nJournal Notes:\n${recentJournals}\nActive Reminders:\n${activeReminders || "None"}\nBehavioral Responses:\n${ritualResponses}`;
                 
                 try {
                     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
@@ -229,7 +237,7 @@
                     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "Architect silent.";
                     const updated = conversations.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, { role: 'assistant', text }], lastUpdated: new Date().toISOString() } : c);
                     setConversations(updated);
-                    save(habits, completions, systemState, activityLogs, journalEntries, updated, quotes);
+                    save(habits, completions, systemState, activityLogs, journalEntries, updated, quotes, reminders);
                 } catch (e) {} finally { setIsAiLoading(false); }
             };
 
@@ -242,39 +250,32 @@
             };
 
             const createNewChat = () => {
-                const newChat = { id: Date.now().toString(), title: `Chat ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`, messages: [{ role: 'assistant', text: "Adviser present. I've synced your latest notes. How shall we begin?" }], lastUpdated: new Date().toISOString() };
+                const newChat = { id: Date.now().toString(), title: `Chat ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`, messages: [{ role: 'assistant', text: "Adviser present. I've synced your latest notes and reminders. How shall we begin?" }], lastUpdated: new Date().toISOString() };
                 const updated = [newChat, ...conversations]; setConversations(updated); setActiveChatId(newChat.id);
-                save(habits, completions, systemState, activityLogs, journalEntries, updated, quotes);
+                save(habits, completions, systemState, activityLogs, journalEntries, updated, quotes, reminders);
             };
 
-            // --- COMPLETION & PROMPT LOGIC ---
             const toggleHabit = (day, habit) => {
                 const key = `${viewDate.getFullYear()}-${String(viewDate.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}-${habit.id}`;
                 const isT = day === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth();
                 const expired = isT && currentHour >= (habit.limit || 24);
 
                 const newC = {...completions};
-                
                 if (newC[key]) {
-                    // Turn Off
                     delete newC[key];
                     setCompletions(newC);
-                    save(habits, newC, systemState, logActivity('untoggle', habit.name), journalEntries, conversations, quotes);
+                    save(habits, newC, systemState, logActivity('untoggle', habit.name), journalEntries, conversations, quotes, reminders);
                 } else {
-                    // Turn On
                     if (expired && !confirm("Marking this as LATE (-0.5 pts)?")) return;
-                    
                     if (habit.prompt) {
-                        // Trigger Question Flow
                         setActivePromptHabit(habit);
                         setPendingCompletionKey(key);
                         setIsPromptModalOpen(true);
                         setPromptInput("");
                     } else {
-                        // Direct Complete
                         newC[key] = { timestamp: adjustedTime.toISOString(), isLate: !isT || expired };
                         setCompletions(newC);
-                        save(habits, newC, systemState, logActivity('toggle', habit.name), journalEntries, conversations, quotes);
+                        save(habits, newC, systemState, logActivity('toggle', habit.name), journalEntries, conversations, quotes, reminders);
                     }
                 }
             };
@@ -283,25 +284,13 @@
                 const habit = activePromptHabit;
                 const key = pendingCompletionKey;
                 if (!habit || !key) return;
-
                 const dayParts = key.split('-');
                 const isT = parseInt(dayParts[2]) === adjustedTime.getUTCDate() && (parseInt(dayParts[1]) - 1) === adjustedTime.getUTCMonth();
                 const expired = isT && currentHour >= (habit.limit || 24);
-
-                const newC = {
-                    ...completions,
-                    [key]: { 
-                        timestamp: adjustedTime.toISOString(), 
-                        isLate: !isT || expired,
-                        answer: promptInput 
-                    }
-                };
+                const newC = { ...completions, [key]: { timestamp: adjustedTime.toISOString(), isLate: !isT || expired, answer: promptInput } };
                 setCompletions(newC);
-                save(habits, newC, systemState, logActivity('toggle', habit.name + ' (w/ answer)'), journalEntries, conversations, quotes);
-                
-                setIsPromptModalOpen(false);
-                setActivePromptHabit(null);
-                setPendingCompletionKey(null);
+                save(habits, newC, systemState, logActivity('toggle', habit.name + ' (w/ answer)'), journalEntries, conversations, quotes, reminders);
+                setIsPromptModalOpen(false); setActivePromptHabit(null); setPendingCompletionKey(null);
             };
 
             const handleRitualSubmit = () => {
@@ -316,7 +305,7 @@
                     logActivity('add_ritual', newHabit.name);
                 }
                 setHabits(updated);
-                save(updated, completions, systemState, activityLogs, journalEntries, conversations, quotes);
+                save(updated, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders);
                 setNewHabit({ name: '', icon: '✨', category: 'Morning', prompt: '' }); setEditingHabitId(null); setIsAdding(false);
             };
 
@@ -351,22 +340,10 @@
                     setConversations(p.conversations || []); if (p.systemState) setSystemState(p.systemState);
                     if (p.conversations?.length) setActiveChatId(p.conversations[0].id);
                     if (p.quotes) setQuotes(p.quotes);
+                    if (p.reminders) setReminders(p.reminders);
                 }
                 return () => clearInterval(timer);
             }, []);
-
-            useEffect(() => {
-                if (!services) return;
-                const { signInAnonymously, onAuthStateChanged, signInWithCustomToken } = window.FirebaseSDK;
-                const authInit = async () => {
-                    try {
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(services.auth, __initial_auth_token);
-                        else await signInAnonymously(services.auth);
-                    } catch (e) {}
-                };
-                authInit();
-                return onAuthStateChanged(services.auth, setUser);
-            }, [services]);
 
             return (
                 <div className="pb-24 px-4 sm:px-10 max-w-7xl mx-auto space-y-10 mt-6 md:mt-10 animate-fade-in">
@@ -399,7 +376,7 @@
                         </div>
                     </header>
 
-                    {/* STATS SECTION */}
+                    {/* DASHBOARD STATS */}
                     <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className={`p-8 rounded-[3.5rem] shadow-xl transition-all duration-500 flex flex-col justify-between min-h-[220px] ${isCommitted ? 'bg-white border' : 'integrity-gradient text-white shadow-indigo-200/50'}`}>
                             <div>
@@ -408,7 +385,7 @@
                             </div>
                             {!isCommitted && <button onClick={() => {
                                 const ns = {...systemState, lastCommit: todayKey, commitTime: Date.now()};
-                                setSystemState(ns); save(habits, completions, ns, logActivity('commit', todayKey), journalEntries, conversations, quotes);
+                                setSystemState(ns); save(habits, completions, ns, logActivity('commit', todayKey), journalEntries, conversations, quotes, reminders);
                             }} className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black shadow-xl hover:scale-105 active:scale-95 transition-all">Seal Today</button>}
                         </div>
                         <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border flex flex-col justify-center items-center group text-center">
@@ -417,8 +394,8 @@
                         </div>
                         <div className="bg-indigo-600 p-8 rounded-[3.5rem] shadow-xl text-white flex flex-col justify-between relative overflow-hidden">
                             <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl" />
-                            <p className="text-sm font-medium opacity-90 italic z-10 text-white">"Identity is establishing a history of kept promises."</p>
-                            <button onClick={() => setIsJournalOpen(true)} className="w-full py-4 bg-white text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-50 transition-all z-10">Capture Reflection 📝</button>
+                            <p className="text-sm font-medium opacity-90 italic z-10 text-white">"Discipline is the highest form of self-love."</p>
+                            <button onClick={() => { setNoteType('reflection'); setIsJournalOpen(true); }} className="w-full py-4 bg-white text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-50 transition-all z-10">Capture Reflection 📝</button>
                         </div>
                     </section>
 
@@ -488,38 +465,52 @@
                         </div>
                     </div>
 
-                    {/* PINBOARD SECTION */}
+                    {/* PINBOARD SECTION: STICKIES & REMINDERS */}
                     <div className="pt-10 space-y-8">
                         <div className="flex items-center justify-center gap-4">
                             <div className="flex flex-col items-center gap-1 text-center">
                                 <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Pinboard of Resolve</h2>
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Subjective reflections & motivational anchors</p>
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Psychological anchors & identity reminders</p>
                             </div>
                             <button 
-                                onClick={() => setIsJournalOpen(true)}
+                                onClick={() => { setNoteType('reminder'); setIsJournalOpen(true); }}
                                 className="w-8 h-8 rounded-full border border-slate-200 text-slate-400 hover:text-indigo-600 flex items-center justify-center transition-all bg-white shadow-sm"
+                                title="Pin Reminder"
                             >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
                             </button>
                         </div>
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-10 px-4 pb-20">
-                            {/* Quotes */}
+                            {/* Quotes (Yellow) */}
                             {quotes.map((q, i) => (
                                 <div key={`quote-${i}`} className="dashboard-sticky p-10 min-h-[220px] relative transform rotate-[-2deg] flex items-center justify-center text-center group">
                                     <div className="sticky-pin" />
-                                    <button onClick={() => { const nq = quotes.filter((_, idx) => idx !== i); setQuotes(nq); save(habits, completions, systemState, activityLogs, journalEntries, conversations, nq); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-500">✕</button>
-                                    <p className="text-2xl font-bold text-slate-700 italic">"{q}"</p>
+                                    <button onClick={() => { const nq = quotes.filter((_, idx) => idx !== i); setQuotes(nq); save(habits, completions, systemState, activityLogs, journalEntries, conversations, nq, reminders); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-500">✕</button>
+                                    <p className="text-2xl font-bold text-slate-700 italic leading-tight">"{q}"</p>
                                 </div>
                             ))}
 
-                            {/* Journal Stickies */}
+                            {/* Reflections (Yellow) */}
                             {journalEntries.map((e, i) => (
-                                <div key={`note-${i}`} className="dashboard-sticky p-10 min-h-[220px] relative transform rotate-[1.5deg] group">
+                                <div key={`note-${i}`} className="dashboard-sticky p-10 min-h-[220px] relative transform rotate-[1.5deg] group flex flex-col justify-between">
                                     <div className="sticky-pin" />
-                                    <button onClick={() => { if(confirm("Discard reflection?")) { const u = journalEntries.filter(je => je.timestamp !== e.timestamp); setJournalEntries(u); save(habits, completions, systemState, activityLogs, u, conversations, quotes); } }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-500">✕</button>
-                                    <div className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-6 text-center">{new Date(e.timestamp).toLocaleDateString()}</div>
+                                    <button onClick={() => { if(confirm("Discard reflection?")) { const u = journalEntries.filter(je => je.timestamp !== e.timestamp); setJournalEntries(u); save(habits, completions, systemState, activityLogs, u, conversations, quotes, reminders); } }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-500">✕</button>
+                                    <div className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-4 text-center">{new Date(e.timestamp).toLocaleDateString()}</div>
                                     <p className="text-xl font-bold text-slate-800 leading-tight">"{e.text}"</p>
+                                </div>
+                            ))}
+
+                            {/* Reminders (Pink) */}
+                            {reminders.map((r, i) => (
+                                <div key={`rem-${i}`} className="dashboard-sticky dashboard-sticky-reminder p-10 min-h-[220px] relative transform rotate-[-1deg] group flex flex-col justify-center">
+                                    <div className="sticky-pin" />
+                                    <button onClick={() => { const ur = reminders.filter(rm => rm.timestamp !== r.timestamp); setReminders(ur); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, ur); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-500">✕</button>
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <div className="w-2 h-2 rounded-full bg-red-400" />
+                                        <span className="text-[10px] font-black text-red-500 uppercase tracking-[0.2em]">Reminder</span>
+                                    </div>
+                                    <p className="text-xl font-bold text-red-900 leading-tight">"{r.text}"</p>
                                 </div>
                             ))}
                         </div>
@@ -532,36 +523,20 @@
                                 <div className="text-5xl mb-2">{activePromptHabit?.icon}</div>
                                 <h2 className="text-2xl font-black text-slate-900 tracking-tight">{activePromptHabit?.name} Complete</h2>
                                 <p className="text-indigo-600 font-bold italic text-lg leading-relaxed">"{activePromptHabit?.prompt}"</p>
-                                <textarea 
-                                    autoFocus
-                                    value={promptInput} 
-                                    onChange={e => setPromptInput(e.target.value)} 
-                                    className="w-full h-32 p-6 bg-slate-50 rounded-[2rem] outline-none border focus:ring-4 ring-indigo-50 text-slate-800"
-                                    placeholder="Your answer..."
-                                />
+                                <textarea autoFocus value={promptInput} onChange={e => setPromptInput(e.target.value)} className="w-full h-32 p-6 bg-slate-50 rounded-[2rem] outline-none border focus:ring-4 ring-indigo-50 text-slate-800" placeholder="Your answer..." />
                                 <div className="flex gap-4">
-                                    <button 
-                                        onClick={() => setIsPromptModalOpen(false)} 
-                                        className="flex-1 py-4 font-black text-slate-400 uppercase text-xs"
-                                    >
-                                        Skip
-                                    </button>
-                                    <button 
-                                        onClick={finalizePromptCompletion}
-                                        className="flex-[2] bg-indigo-600 text-white py-5 rounded-[2rem] font-black shadow-xl hover:bg-indigo-700 transition-all uppercase text-xs"
-                                    >
-                                        Log Response
-                                    </button>
+                                    <button onClick={() => setIsPromptModalOpen(false)} className="flex-1 py-4 font-black text-slate-400 uppercase text-xs">Skip</button>
+                                    <button onClick={finalizePromptCompletion} className="flex-[2] bg-indigo-600 text-white py-5 rounded-[2rem] font-black shadow-xl hover:bg-indigo-700 transition-all uppercase text-xs">Log Response</button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* MODAL: ADD/EDIT RITUAL (WITH PROMPT OPTION) */}
+                    {/* MODAL: ADD/EDIT RITUAL */}
                     {isAdding && (
                         <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-fade-in">
                             <div className="bg-white w-full max-w-lg rounded-[3rem] p-10 md:p-12 shadow-2xl border border-white space-y-6 max-h-[90vh] overflow-y-auto custom-scrollbar">
-                                <h2 className="text-3xl font-black tracking-tighter text-slate-900 text-center">{editingHabitId ? 'Update Architecture' : 'Establish Ritual'}</h2>
+                                <h2 className="text-3xl font-black tracking-tighter text-slate-900 text-center">{editingHabitId ? 'Update Ritual' : 'Establish Ritual'}</h2>
                                 <div className="space-y-6">
                                     <div className="flex gap-4">
                                         <input type="text" value={newHabit.icon} onChange={(e) => setNewHabit({...newHabit, icon: e.target.value})} className="w-20 p-5 bg-slate-50 border border-slate-100 rounded-3xl text-3xl text-center outline-none" />
@@ -569,13 +544,7 @@
                                     </div>
                                     <div className="space-y-3">
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 text-center block">Completion Prompt (Optional)</label>
-                                        <input 
-                                            type="text" 
-                                            value={newHabit.prompt} 
-                                            onChange={(e) => setNewHabit({...newHabit, prompt: e.target.value})} 
-                                            className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm italic outline-none text-slate-700"
-                                            placeholder="e.g., What did you learn?"
-                                        />
+                                        <input type="text" value={newHabit.prompt} onChange={(e) => setNewHabit({...newHabit, prompt: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm italic outline-none text-slate-700" placeholder="e.g., What did you learn?" />
                                     </div>
                                     <div className="space-y-3">
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 text-center block">Cycle Lock</label>
@@ -594,7 +563,7 @@
                         </div>
                     )}
 
-                    {/* PRESERVED AI MODAL */}
+                    {/* AI MODAL */}
                     {isAiOpen && (
                         <div className="fixed inset-0 z-[110] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-4">
                             <div className="bg-white w-full max-w-6xl rounded-[4rem] shadow-2xl h-[85vh] flex overflow-hidden border border-white/20">
@@ -619,7 +588,7 @@
                                         {isAiLoading && <div className="text-[10px] font-black text-indigo-400 animate-pulse text-center uppercase tracking-widest">Architect is reasoning...</div>}
                                     </div>
                                     <div className="p-6 md:p-8 border-t flex gap-4 bg-white shrink-0">
-                                        <input value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAiSend()} className="flex-1 bg-slate-50 p-5 rounded-3xl text-sm outline-none border focus:border-indigo-200 shadow-inner" placeholder="Ask the Architect..." />
+                                        <input value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAiSend()} className="flex-1 bg-slate-50 p-5 rounded-3xl text-sm outline-none border focus:border-indigo-200 shadow-inner" placeholder="Analyze my performance..." />
                                         <button onClick={handleAiSend} className="bg-slate-900 text-white px-8 rounded-3xl font-black">→</button>
                                     </div>
                                 </div>
@@ -627,31 +596,41 @@
                         </div>
                     )}
 
-                    {/* MODAL: CAPTURE JOURNAL ENTRY */}
+                    {/* MODAL: DUAL-MODE CAPTURE (Journal/Reminder) */}
                     {isJournalOpen && (
                         <div className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
                             <div className="bg-white w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl border-white border-8 space-y-6 flex flex-col">
-                                <h2 className="text-3xl font-black tracking-tighter text-center">Capture Reflection</h2>
-                                <textarea value={journalInput} onChange={e => setJournalInput(e.target.value)} className="w-full h-64 p-8 bg-[#fff9c4] rounded-[2rem] outline-none border-none text-slate-800 leading-relaxed font-['Kalam'] text-xl shadow-inner resize-none" placeholder="What's your raw truth today?" />
+                                <div className="flex bg-slate-50 p-1.5 rounded-[1.5rem] border">
+                                    <button onClick={() => setNoteType('reflection')} className={`flex-1 py-3 rounded-[1rem] text-[10px] font-black uppercase tracking-widest transition-all ${noteType === 'reflection' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-100'}`}>Reflection Note</button>
+                                    <button onClick={() => setNoteType('reminder')} className={`flex-1 py-3 rounded-[1rem] text-[10px] font-black uppercase tracking-widest transition-all ${noteType === 'reminder' ? 'bg-red-500 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-100'}`}>System Reminder</button>
+                                </div>
+                                <h2 className="text-3xl font-black tracking-tighter text-center">{noteType === 'reflection' ? 'Capture Reflection' : 'Identity Reminder'}</h2>
+                                <textarea value={journalInput} onChange={e => setJournalInput(e.target.value)} className={`w-full h-64 p-8 rounded-[2rem] outline-none border-none leading-relaxed font-['Kalam'] text-xl shadow-inner resize-none ${noteType === 'reflection' ? 'bg-[#fff9c4] text-slate-800' : 'bg-[#fce4ec] text-red-900'}`} placeholder={noteType === 'reflection' ? "What's your raw truth today?" : "What do you need to remember for your rituals?"} />
                                 <div className="flex gap-4">
                                     <button onClick={() => { setIsJournalOpen(false); setJournalInput(""); }} className="flex-1 py-4 font-black text-slate-400 uppercase text-xs hover:text-slate-600 transition-colors">Discard</button>
                                     <button onClick={() => { 
-                                        const entry = { timestamp: new Date().toISOString(), text: journalInput };
-                                        const updated = [entry, ...journalEntries]; setJournalEntries(updated); setJournalInput(""); setIsJournalOpen(false); 
-                                        save(habits, completions, systemState, logActivity('journal', 'Sealed'), updated, conversations, quotes); 
-                                    }} className="flex-[2] bg-indigo-600 text-white py-5 rounded-[2rem] font-black shadow-xl uppercase text-xs hover:bg-indigo-700 transition-all">Pin Reflection</button>
+                                        if (noteType === 'reflection') {
+                                            const entry = { timestamp: new Date().toISOString(), text: journalInput };
+                                            const updated = [entry, ...journalEntries]; setJournalEntries(updated); setIsJournalOpen(false); setJournalInput("");
+                                            save(habits, completions, systemState, logActivity('reflection', 'Pinned'), updated, conversations, quotes, reminders);
+                                        } else {
+                                            const entry = { timestamp: new Date().toISOString(), text: journalInput };
+                                            const updated = [entry, ...reminders]; setReminders(updated); setIsJournalOpen(false); setJournalInput("");
+                                            save(habits, completions, systemState, logActivity('reminder', 'Pinned'), journalEntries, conversations, quotes, updated);
+                                        }
+                                    }} className={`flex-[2] py-5 rounded-[2rem] font-black shadow-xl uppercase text-xs transition-all ${noteType === 'reflection' ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-red-500 text-white hover:bg-red-600'}`}>Pin To Dashboard</button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* FAB COMMAND CENTER */}
+                    {/* COMMAND CENTER FAB */}
                     <div className="fixed bottom-8 right-8 group fab-container z-[100]">
                         <div className="flex flex-col items-end gap-3 mb-4 pointer-events-none group-hover:pointer-events-auto">
-                            <button onClick={() => { if(!conversations.length) createNewChat(); setIsAiOpen(true); }} className="fab-menu-item w-14 h-14 bg-indigo-600 text-white rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-indigo-700 pointer-events-auto">🧠</button>
-                            <button onClick={() => setIsJournalOpen(true)} className="fab-menu-item w-14 h-14 bg-white border text-slate-700 rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-slate-50 pointer-events-auto">📝</button>
-                            <button onClick={() => { setIsLogOpen(true); setLogTab('journal'); }} className="fab-menu-item w-14 h-14 bg-white border text-slate-700 rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-slate-50 pointer-events-auto">📋</button>
-                            <button onClick={() => setIsInfoOpen(true)} className="fab-menu-item w-14 h-14 bg-white border text-slate-700 rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-slate-50 pointer-events-auto">⚙️</button>
+                            <button onClick={() => { if(!conversations.length) createNewChat(); setIsAiOpen(true); }} className="fab-menu-item w-14 h-14 bg-indigo-600 text-white rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-indigo-700 pointer-events-auto transition-all">🧠</button>
+                            <button onClick={() => { setNoteType('reflection'); setIsJournalOpen(true); }} className="fab-menu-item w-14 h-14 bg-white border text-slate-700 rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-slate-50 pointer-events-auto transition-all">📝</button>
+                            <button onClick={() => { setIsLogOpen(true); setLogTab('journal'); }} className="fab-menu-item w-14 h-14 bg-white border text-slate-700 rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-slate-50 pointer-events-auto transition-all">📋</button>
+                            <button onClick={() => setIsInfoOpen(true)} className="fab-menu-item w-14 h-14 bg-white border text-slate-700 rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-slate-50 pointer-events-auto transition-all">⚙️</button>
                         </div>
                         <button className="w-16 h-16 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center transition-transform duration-300 group-hover:rotate-45">
                             <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
@@ -667,7 +646,7 @@
                                     <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4">
                                         <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest text-center">Pinboard Anchors</h4>
                                         <div className="flex gap-2">
-                                            <input type="text" value={newQuoteInput} onChange={(e) => setNewQuoteInput(e.target.value)} placeholder="Add anchor..." className="flex-1 p-3 bg-white border rounded-xl text-xs outline-none" onKeyPress={e => e.key === 'Enter' && (setQuotes([...quotes, newQuoteInput]), setNewQuoteInput(''))} />
+                                            <input type="text" value={newQuoteInput} onChange={(e) => setNewQuoteInput(e.target.value)} placeholder="Add anchor..." className="flex-1 p-3 bg-white border rounded-xl text-xs outline-none shadow-inner" onKeyPress={e => e.key === 'Enter' && (setQuotes([...quotes, newQuoteInput]), setNewQuoteInput(''))} />
                                             <button onClick={() => { if(!newQuoteInput) return; setQuotes([...quotes, newQuoteInput]); setNewQuoteInput(''); }} className="bg-indigo-600 text-white px-4 rounded-xl font-bold shadow-lg">+</button>
                                         </div>
                                         <div className="space-y-2 max-h-32 overflow-y-auto">
@@ -681,8 +660,8 @@
                                     </div>
                                     <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4 text-center">
                                         <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest text-center">Intelligence Setup</h4>
-                                        <input type="password" value={systemState.geminiKey} onChange={e => setSystemState({...systemState, geminiKey: e.target.value.trim()})} placeholder="Paste Gemini Key" className="w-full p-4 bg-white border rounded-2xl text-xs outline-none focus:ring-4 ring-indigo-100" />
-                                        <textarea value={systemState.geminiPersona} onChange={e => setSystemState({...systemState, geminiPersona: e.target.value})} className="w-full p-4 h-32 bg-white border rounded-2xl text-xs outline-none focus:ring-4 ring-indigo-100" />
+                                        <input type="password" value={systemState.geminiKey} onChange={e => setSystemState({...systemState, geminiKey: e.target.value.trim()})} placeholder="Paste Gemini Key" className="w-full p-4 bg-white border rounded-2xl text-xs outline-none focus:ring-4 ring-indigo-100 shadow-sm" />
+                                        <textarea value={systemState.geminiPersona} onChange={e => setSystemState({...systemState, geminiPersona: e.target.value})} className="w-full p-4 h-32 bg-white border rounded-2xl text-xs outline-none focus:ring-4 ring-indigo-100 shadow-sm" />
                                     </div>
                                     <div className="p-8 bg-slate-50 rounded-[2.5rem] text-center">
                                         <h4 className="text-[10px] font-black text-indigo-600 uppercase mb-4 tracking-widest">GMT Offset</h4>
@@ -691,19 +670,19 @@
                                         </select>
                                     </div>
                                 </div>
-                                <button onClick={() => { setIsInfoOpen(false); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes); }} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl">Save & Close</button>
+                                <button onClick={() => { setIsInfoOpen(false); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders); }} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-800 transition-all">Save & Close</button>
                             </div>
                         </div>
                     )}
 
-                    {/* LEDGER MODAL (REVISED) */}
+                    {/* LEDGER MODAL */}
                     {isLogOpen && (
                         <div className="fixed inset-0 z-[120] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-4 md:p-6">
                             <div className="bg-white w-full max-w-4xl rounded-[4rem] p-10 shadow-2xl relative flex flex-col max-h-[85vh]">
                                 <button onClick={() => setIsLogOpen(false)} className="absolute top-8 right-10 text-slate-400 text-2xl hover:text-slate-600">✕</button>
                                 <h2 className="text-4xl font-black tracking-tighter mb-6 text-center text-slate-900">Intelligence Ledger</h2>
                                 <div className="flex bg-slate-100 p-1.5 rounded-[2rem] mb-8 shrink-0">
-                                    {['journal', 'integrity', 'activity'].map(t => <button key={t} onClick={() => setLogTab(t)} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-[1.5rem] transition-all ${logTab === t ? 'bg-white shadow-md text-indigo-600' : 'text-slate-400'}`}>{t}</button>)}
+                                    {['journal', 'reminders', 'integrity', 'activity'].map(t => <button key={t} onClick={() => setLogTab(t)} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-[1.5rem] transition-all ${logTab === t ? 'bg-white shadow-md text-indigo-600' : 'text-slate-400'}`}>{t}</button>)}
                                 </div>
                                 <div className="flex-1 overflow-y-auto custom-scrollbar space-y-8 p-4">
                                     {logTab === 'integrity' && integrityMetrics.logs.map((l, i) => (
@@ -715,11 +694,7 @@
                                                 </div>
                                                 <div className={`text-sm font-black px-4 py-2 rounded-2xl ${l.type==='plus'?'text-emerald-600 bg-emerald-50':'text-orange-600 bg-orange-50'}`}>{l.points}</div>
                                             </div>
-                                            {l.answer && (
-                                                <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100/50 italic text-xs text-indigo-900">
-                                                    “{l.answer}”
-                                                </div>
-                                            )}
+                                            {l.answer && <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100/50 italic text-xs text-indigo-900">“{l.answer}”</div>}
                                         </div>
                                     ))}
                                     {logTab === 'activity' && activityLogs.map((log, i) => <div key={i} className="p-5 bg-slate-50 rounded-[2rem] border text-[11px] font-bold text-slate-800 transition-all hover:bg-white shadow-sm">{log.humanReadable}</div>)}
@@ -730,12 +705,25 @@
                                                     <div className="sticky-pin" />
                                                     <div className="flex justify-between items-start mb-4">
                                                         <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">{new Date(e.timestamp).toLocaleDateString()}</span>
-                                                        <button onClick={() => { if(confirm("Remove note?")) { const u = journalEntries.filter(je => je.timestamp !== e.timestamp); setJournalEntries(u); save(habits, completions, systemState, activityLogs, u, conversations, quotes); } }} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-500 transition-all">✕</button>
+                                                        <button onClick={() => { if(confirm("Remove note?")) { const u = journalEntries.filter(je => je.timestamp !== e.timestamp); setJournalEntries(u); save(habits, completions, systemState, activityLogs, u, conversations, quotes, reminders); } }} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-500 transition-all">✕</button>
                                                     </div>
                                                     <p className="text-lg font-bold text-slate-700 leading-tight">"{e.text}"</p>
                                                 </div>
                                             ))}
-                                            {journalEntries.length === 0 && <div className="col-span-full py-20 text-center text-slate-300 italic">Pinboard empty. Capture your raw truth above.</div>}
+                                        </div>
+                                    )}
+                                    {logTab === 'reminders' && (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            {reminders.map((r, i) => (
+                                                <div key={i} className={`dashboard-sticky dashboard-sticky-reminder p-8 rounded-sm transform ${i % 2 === 0 ? 'rotate-1' : '-rotate-1'} hover:rotate-0 transition-transform duration-300 relative group`}>
+                                                    <div className="sticky-pin" />
+                                                    <div className="flex justify-between items-start mb-4">
+                                                        <span className="text-[9px] font-black text-red-400 uppercase tracking-widest">Active Reminder</span>
+                                                        <button onClick={() => { const ur = reminders.filter(rm => rm.timestamp !== r.timestamp); setReminders(ur); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, ur); }} className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all">✕</button>
+                                                    </div>
+                                                    <p className="text-lg font-bold text-red-900 leading-tight">"{r.text}"</p>
+                                                </div>
+                                            ))}
                                         </div>
                                     )}
                                 </div>
