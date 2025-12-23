@@ -46,21 +46,20 @@
         const App = () => {
             const { useState, useEffect, useMemo } = React;
 
-            const STORAGE_KEY = 'focuslab_behavioral_v2.2';
+            const STORAGE_KEY = 'focuslab_behavioral_v2.5';
             const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
             
             const DEFAULT_HABITS = [
                 { id: '1', name: 'Deep Work', icon: '💻', category: 'Morning', priority: 'core', limit: 11 },
                 { id: '2', name: 'Movement', icon: '🏃', category: 'Afternoon', priority: 'core', limit: 18 },
                 { id: '3', name: 'Hydration', icon: '💧', category: 'Morning', priority: 'support', limit: 11 },
-                { id: '4', name: 'Reading', icon: '📖', category: 'Evening', priority: 'support', limit: 23 }
+                { id: '4', name: 'Reading', icon: '📖', category: 'Evening', priority: 'support', limit: 24 }
             ];
 
             // --- STATE ---
             const [user, setUser] = useState(null);
             const [habits, setHabits] = useState([]);
             const [completions, setCompletions] = useState({});
-            const [currentDate, setCurrentDate] = useState(new Date());
             const [viewMode, setViewMode] = useState('week');
             const [isAdding, setIsAdding] = useState(false);
             const [isInfoOpen, setIsInfoOpen] = useState(false);
@@ -71,9 +70,39 @@
                 mode: 'NORMAL', 
                 lastCommit: '', 
                 commitTime: 0,
-                lastAutopsy: '' 
+                gmtOffset: 6 // Default Bangladesh Time
             });
             const [time, setTime] = useState(new Date());
+            const [navDate, setNavDate] = useState(new Date()); // Date used for month navigation
+
+            // --- CLOCK & GMT LOGIC ---
+            useEffect(() => {
+                const timer = setInterval(() => setTime(new Date()), 1000);
+                return () => clearInterval(timer);
+            }, []);
+
+            const adjustedTime = useMemo(() => {
+                const utc = time.getTime() + (time.getTimezoneOffset() * 60000);
+                return new Date(utc + (3600000 * systemState.gmtOffset));
+            }, [time, systemState.gmtOffset]);
+
+            // Unified Key Generation Function
+            function getDayKey(day, year, month) {
+                const m = String(month + 1).padStart(2, '0');
+                const d = String(day).padStart(2, '0');
+                return `${year}-${m}-${d}`;
+            }
+
+            const current12hTime = adjustedTime.toLocaleTimeString('en-US', { 
+                hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'UTC' 
+            });
+            
+            const currentHour = adjustedTime.getUTCHours();
+            const currentPhase = currentHour < 12 ? 'Morning' : currentHour < 17 ? 'Afternoon' : 'Evening';
+            
+            const todayKey = useMemo(() => {
+                return getDayKey(adjustedTime.getUTCDate(), adjustedTime.getUTCFullYear(), adjustedTime.getUTCMonth());
+            }, [adjustedTime.getUTCDate(), adjustedTime.getUTCMonth(), adjustedTime.getUTCFullYear()]);
 
             // --- FIREBASE CONFIG ---
             const firebaseConfig = window.__firebase_config ? JSON.parse(window.__firebase_config) : { apiKey: "" };
@@ -87,31 +116,15 @@
                 } catch (e) { return null; }
             }, []);
 
-            // --- HELPERS ---
-            const format12h = (hour) => {
-                const h = hour % 12 || 12;
-                const ampm = hour >= 12 ? 'PM' : 'AM';
-                return `${h}:00 ${ampm}`;
-            };
-            const getDayKey = (day, dObj = currentDate) => {
-                const y = dObj.getFullYear();
-                const m = String(dObj.getMonth() + 1).padStart(2, '0');
-                const d = String(day).padStart(2, '0');
-                return `${y}-${m}-${d}`;
-            };
-            const todayKey = getDayKey(new Date().getDate(), new Date());
-
-            // --- DATA LOADING & SYNC ---
+            // --- DATA SYNC ---
             useEffect(() => {
                 const local = localStorage.getItem(STORAGE_KEY);
                 if (local) {
                     const p = JSON.parse(local);
                     setHabits(p.habits || DEFAULT_HABITS);
                     setCompletions(p.completions || {});
-                    setSystemState(p.systemState || { mode: 'NORMAL', lastCommit: '', commitTime: 0 });
+                    if (p.systemState) setSystemState(p.systemState);
                 } else { setHabits(DEFAULT_HABITS); }
-                const timer = setInterval(() => setTime(new Date()), 1000);
-                return () => clearInterval(timer);
             }, []);
 
             useEffect(() => {
@@ -130,81 +143,26 @@
                 }
             };
 
-            // --- BUSINESS LOGIC ---
-            const integrityMetrics = useMemo(() => {
-                let honestyPoints = 0;
-                let logs = [];
-
-                // Sort completion keys by timestamp to show logical log
-                const sortedKeys = Object.keys(completions).sort((a, b) => {
-                    return new Date(completions[b].timestamp) - new Date(completions[a].timestamp);
-                });
-
-                sortedKeys.forEach(k => {
-                    const comp = completions[k];
-                    const [year, month, day, habitId] = k.split('-');
-                    const habit = habits.find(h => h.id === habitId);
-                    const ritualName = habit ? habit.name : 'Unknown Ritual';
-                    const ritualIcon = habit ? habit.icon : '•';
-                    
-                    if (!comp.isLate) {
-                        honestyPoints++;
-                        logs.push({
-                            type: 'plus',
-                            points: '+1.0',
-                            reason: `Honored promise: ${ritualIcon} ${ritualName}`,
-                            date: `${day} ${MONTHS[parseInt(month)-1]}`,
-                            time: new Date(comp.timestamp).toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true})
-                        });
-                    } else {
-                        honestyPoints -= 0.5;
-                        logs.push({
-                            type: 'minus',
-                            points: '-0.5',
-                            reason: `Self-deception penalty: Retro-checked ${ritualIcon} ${ritualName}`,
-                            date: `${day} ${MONTHS[parseInt(month)-1]}`,
-                            time: new Date(comp.timestamp).toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true})
-                        });
-                    }
-                });
-
-                let title = "The Observer";
-                let color = "text-slate-400";
-                if (honestyPoints > 10) { title = "The Practitioner"; color = "text-indigo-600"; }
-                if (honestyPoints > 50) { title = "The Integrated"; color = "text-amber-600"; }
-
-                const next = habits.find(h => !completions[`${todayKey}-${h.id}`] && time.getHours() < h.limit)
-                          || habits.find(h => !completions[`${todayKey}-${h.id}`]);
-
-                let timeRemaining = null;
-                if (next) {
-                    const deadline = new Date();
-                    deadline.setHours(next.limit, 0, 0, 0);
-                    const diff = Math.max(0, deadline - time);
-                    const mins = Math.floor(diff / 60000);
-                    timeRemaining = mins > 60 ? `${Math.floor(mins/60)}h ${mins%60}m` : `${mins} mins`;
-                }
-
-                return { title, color, points: honestyPoints, next, timeRemaining, logs };
-            }, [habits, completions, todayKey, time]);
-
-            const isCommitted = systemState.lastCommit === todayKey;
-            const canStillEdit = isCommitted && (Date.now() - systemState.commitTime < 15 * 60000);
+            // --- ACTIONS ---
+            const format12h = (hour) => {
+                const h = hour % 12 || 12;
+                const ampm = hour >= 12 && hour < 24 ? 'PM' : 'AM';
+                return `${h}:00 ${ampm}`;
+            };
 
             const toggle = (day, habitId) => {
-                const dayKey = getDayKey(day);
-                const isT = dayKey === todayKey;
+                const targetDayKey = getDayKey(day, navDate.getFullYear(), navDate.getMonth());
+                const isRealToday = targetDayKey === todayKey;
                 const habit = habits.find(h => h.id === habitId);
-                const now = new Date();
 
-                if (isT && now.getHours() >= habit.limit) {
+                if (isRealToday && currentHour >= habit.limit) {
                     if (!confirm(`Window closed at ${format12h(habit.limit)}. Mark as late?`)) return;
                 }
 
-                const key = `${dayKey}-${habitId}`;
+                const key = `${targetDayKey}-${habitId}`;
                 const newC = { ...completions };
                 if (newC[key]) delete newC[key];
-                else newC[key] = { status: 'done', timestamp: now.toISOString(), isLate: !isT };
+                else newC[key] = { status: 'done', timestamp: adjustedTime.toISOString(), isLate: !isRealToday };
                 
                 setCompletions(newC);
                 save(habits, newC, systemState);
@@ -216,80 +174,111 @@
                 save(habits, completions, newState);
             };
 
-            const addHabit = () => {
-                if (!newHabit.name) return;
-                const limitMap = { Morning: 11, Afternoon: 18, Evening: 23 };
-                const habit = { 
-                    ...newHabit, 
-                    id: Date.now().toString(), 
-                    limit: limitMap[newHabit.category] 
-                };
-                const updatedHabits = [...habits, habit];
-                setHabits(updatedHabits);
-                save(updatedHabits, completions, systemState);
-                setIsAdding(false);
-                setNewHabit({ name: '', icon: '✨', target: 7, category: 'Morning', priority: 'support' });
+            const handleMonthChange = (offset) => {
+                setNavDate(prev => {
+                    const next = new Date(prev);
+                    next.setMonth(next.getMonth() + offset);
+                    return next;
+                });
             };
 
-            const daysInMonthCount = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
+            // --- CALCULATED METRICS ---
+            const integrityMetrics = useMemo(() => {
+                let honestyPoints = 0;
+                let logs = [];
+                const sortedKeys = Object.keys(completions).sort((a, b) => new Date(completions[b].timestamp) - new Date(completions[a].timestamp));
+
+                sortedKeys.forEach(k => {
+                    const comp = completions[k];
+                    const [y, m, d, habitId] = k.split('-');
+                    const habit = habits.find(h => h.id === habitId);
+                    if (!habit) return;
+                    
+                    if (!comp.isLate) {
+                        honestyPoints++;
+                        logs.push({ type: 'plus', points: '+1.0', reason: `Word kept: ${habit.icon} ${habit.name}`, date: `${d} ${MONTHS[parseInt(m)-1]}`, time: new Date(comp.timestamp).toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true}) });
+                    } else {
+                        honestyPoints -= 0.5;
+                        logs.push({ type: 'minus', points: '-0.5', reason: `Late honoring: ${habit.icon} ${habit.name}`, date: `${d} ${MONTHS[parseInt(m)-1]}`, time: new Date(comp.timestamp).toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true}) });
+                    }
+                });
+
+                const next = habits.find(h => !completions[`${todayKey}-${h.id}`] && currentHour < h.limit)
+                          || habits.find(h => !completions[`${todayKey}-${h.id}`]);
+
+                let timeRemaining = null;
+                if (next) {
+                    const minsRemaining = (next.limit * 60) - (currentHour * 60 + adjustedTime.getUTCMinutes());
+                    timeRemaining = minsRemaining > 60 ? `${Math.floor(minsRemaining/60)}h ${minsRemaining%60}m` : `${Math.max(0, minsRemaining)}m`;
+                }
+
+                let title = honestyPoints > 50 ? "The Integrated" : honestyPoints > 10 ? "The Practitioner" : "The Observer";
+                let color = honestyPoints > 50 ? "text-amber-600" : honestyPoints > 10 ? "text-indigo-600" : "text-slate-400";
+
+                return { title, color, points: honestyPoints, next, timeRemaining, logs };
+            }, [habits, completions, todayKey, currentHour, adjustedTime]);
+
+            const isCommitted = systemState.lastCommit === todayKey;
+            const canStillEdit = isCommitted && (Date.now() - systemState.commitTime < 15 * 60000);
+
             const gridDays = useMemo(() => {
-                const all = Array.from({length: daysInMonthCount}, (_, i) => i + 1);
-                if (viewMode === 'month') return all;
-                const tDate = new Date().getDate();
+                const total = new Date(navDate.getFullYear(), navDate.getMonth() + 1, 0).getDate();
+                if (viewMode === 'month') return Array.from({length: total}, (_, i) => i + 1);
+                
+                const tDate = (navDate.getMonth() === adjustedTime.getUTCMonth()) ? adjustedTime.getUTCDate() : 1;
                 const start = Math.max(1, tDate - 3);
-                const end = Math.min(daysInMonthCount, tDate + 3);
+                const end = Math.min(total, tDate + 3);
                 return Array.from({length: end - start + 1}, (_, i) => start + i);
-            }, [viewMode, daysInMonthCount]);
+            }, [viewMode, navDate, adjustedTime.getUTCDate()]);
 
             return (
                 <div className="pb-10 animate-fade-in px-4 sm:px-6 lg:px-10">
                     <div className="max-w-7xl mx-auto space-y-8 mt-6 lg:mt-10">
                         
-                        {/* HEADER */}
                         <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
                             <div className="space-y-1">
                                 <div className="flex items-center gap-2">
                                     <div className="h-1.5 w-8 bg-slate-900 rounded-full"></div>
-                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Integrity v2.2</span>
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Integrity v2.5</span>
                                     <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded bg-slate-100 ${integrityMetrics.color}`}>
                                         {integrityMetrics.title}
                                     </span>
                                 </div>
-                                <h1 className="text-4xl lg:text-5xl font-black tracking-tighter">Focus<span className="text-slate-300 font-medium">Lab</span></h1>
+                                <h1 className="text-4xl lg:text-5xl font-black tracking-tighter">FocusLab</h1>
                             </div>
                             
                             <div className="flex flex-wrap items-center gap-3 bg-white p-2 rounded-full shadow-lg border border-slate-100">
                                 <div className="flex items-center gap-3 px-4 py-2 bg-slate-900 text-white rounded-full">
                                     <div className="w-2 h-2 rounded-full bg-emerald-500 clock-pulse"></div>
-                                    <span className="text-xs font-black tracking-widest">{time.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true})}</span>
+                                    <span className="text-xs font-black tracking-widest">{current12hTime}</span>
+                                    <span className="text-[9px] font-bold text-slate-400 border-l border-slate-700 pl-2 uppercase">GMT{systemState.gmtOffset >= 0 ? '+' : ''}{systemState.gmtOffset}</span>
                                 </div>
                                 <div className="h-6 w-px bg-slate-100"></div>
-                                <button onClick={() => setViewMode(viewMode === 'week' ? 'month' : 'week')} className="px-4 py-2 text-[10px] font-black uppercase text-indigo-600 hover:bg-slate-50 rounded-full transition-all">
+                                <button onClick={() => setViewMode(viewMode === 'week' ? 'month' : 'week')} className="px-4 py-2 text-[10px] font-black uppercase text-indigo-600 hover:bg-slate-50 rounded-full">
                                     {viewMode === 'week' ? 'Month View' : 'Focus Week'}
                                 </button>
+                                <button onClick={() => setIsInfoOpen(true)} className="w-8 h-8 rounded-full border border-slate-100 flex items-center justify-center text-xs">⚙️</button>
                                 <div className="h-6 w-px bg-slate-100"></div>
-                                <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() - 1)))} className="p-2 text-slate-400">←</button>
-                                <span className="font-black text-xs uppercase tracking-widest min-w-[80px] text-center">{MONTHS[currentDate.getMonth()]}</span>
-                                <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() + 1)))} className="p-2 text-slate-400">→</button>
+                                <button onClick={() => handleMonthChange(-1)} className="p-2 hover:bg-slate-50 rounded-full">←</button>
+                                <span className="font-black text-xs uppercase tracking-widest min-w-[120px] text-center">{MONTHS[navDate.getMonth()]} {navDate.getFullYear()}</span>
+                                <button onClick={() => handleMonthChange(1)} className="p-2 hover:bg-slate-50 rounded-full">→</button>
                             </div>
                         </header>
 
-                        {/* DASHBOARD */}
                         <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div className={`p-8 rounded-[3rem] shadow-xl transition-all duration-500 ${isCommitted ? 'bg-white border border-slate-100' : 'integrity-gradient text-white'}`}>
-                                <h3 className={`text-[10px] font-black uppercase tracking-widest mb-4 ${isCommitted ? 'text-slate-400' : 'text-slate-500'}`}>The Daily Oath</h3>
+                                <h3 className={`text-[10px] font-black uppercase tracking-widest mb-4 ${isCommitted ? 'text-slate-400' : 'text-slate-500'}`}>Integrity Pledge</h3>
                                 {!isCommitted ? (
                                     <div className="space-y-4">
-                                        <p className="text-xl font-bold leading-tight">Today, I commit to honoring my identity through my rituals.</p>
-                                        <button onClick={commitToday} className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl">Seal Today</button>
+                                        <p className="text-xl font-bold leading-tight">Today, I commit to my rituals.</p>
+                                        <button onClick={commitToday} className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl">Commit Now</button>
                                     </div>
                                 ) : (
                                     <div className="space-y-2">
                                         <div className="text-emerald-500 font-black text-sm uppercase flex items-center gap-2">
-                                            <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Oath Active
+                                            <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Active
                                         </div>
-                                        {canStillEdit && <p className="text-[10px] text-amber-500 font-bold uppercase animate-pulse">Grace Period: 15m</p>}
-                                        <p className="text-slate-500 text-sm italic font-medium pt-2">System unlocked. Word is bond.</p>
+                                        <p className="text-slate-500 text-sm italic font-medium pt-2">Identity secured for {todayKey}.</p>
                                     </div>
                                 )}
                             </div>
@@ -302,66 +291,58 @@
                                             {integrityMetrics.next.icon} {integrityMetrics.next.name}
                                         </div>
                                         <div className="flex gap-2">
-                                            <span className="text-[9px] font-black uppercase text-indigo-500 bg-indigo-50 px-2 py-1 rounded-lg">{integrityMetrics.next.category}</span>
-                                            <span className="text-[9px] font-black uppercase text-orange-500 bg-orange-50 px-2 py-1 rounded-lg">{integrityMetrics.timeRemaining} left</span>
+                                            <span className="text-[9px] font-black uppercase text-indigo-500 bg-indigo-50 px-2 py-1 rounded-lg">{integrityMetrics.next.category} Cycle</span>
+                                            <span className="text-[9px] font-black uppercase text-orange-500 bg-orange-50 px-2 py-1 rounded-lg tracking-widest">{integrityMetrics.timeRemaining} Left</span>
                                         </div>
                                         <div className="flex gap-2">
                                             <button 
                                                 disabled={!isCommitted}
-                                                onClick={() => toggle(new Date().getDate(), integrityMetrics.next.id)} 
-                                                className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg active:scale-95 disabled:opacity-10"
+                                                onClick={() => toggle(adjustedTime.getUTCDate(), integrityMetrics.next.id)} 
+                                                className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg disabled:opacity-10"
                                             >
                                                 Honor Ritual
                                             </button>
-                                            <button onClick={() => setIsAdding(true)} className="px-5 bg-slate-50 rounded-2xl border border-slate-100 text-slate-400 hover:text-slate-900 transition-colors">+</button>
+                                            <button onClick={() => setIsAdding(true)} className="px-5 bg-slate-50 rounded-2xl border border-slate-100 text-slate-400 hover:text-slate-900">+</button>
                                         </div>
                                     </div>
                                 ) : (
                                     <div className="flex flex-col items-center justify-center py-4 text-center">
                                         <span className="text-4xl mb-2">🧘</span>
-                                        <div className="font-black text-emerald-500 uppercase text-[10px] tracking-widest">Integrity Secured</div>
+                                        <div className="font-black text-emerald-500 uppercase text-[10px] tracking-widest">Complete</div>
                                     </div>
                                 )}
                             </div>
 
                             <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-slate-100 flex flex-col justify-between">
                                 <div>
-                                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Integrity Balance</h3>
+                                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Balance</h3>
                                     <div className="flex items-baseline gap-2">
                                         <span className="text-6xl font-black tracking-tighter text-slate-900">{integrityMetrics.points}</span>
                                         <span className="text-xs font-bold text-slate-300 uppercase tracking-widest">Pts</span>
                                     </div>
                                 </div>
                                 <button onClick={() => setIsLogOpen(true)} className="text-[9px] text-indigo-600 font-bold uppercase tracking-widest mt-4 text-left hover:underline flex items-center gap-2">
-                                    View Audit Ledger <span>→</span>
+                                    Audit Ledger <span>→</span>
                                 </button>
                             </div>
                         </section>
 
-                        {/* RITUAL GRID */}
-                        <div className={`bg-white rounded-[3rem] shadow-2xl border border-slate-100 overflow-hidden relative ${(!isCommitted && !canStillEdit) ? 'opacity-20 blur-md grayscale pointer-events-none' : ''}`}>
+                        <div className={`bg-white rounded-[3rem] shadow-2xl border border-slate-100 overflow-hidden relative transition-all duration-700 ${(!isCommitted && !canStillEdit) ? 'opacity-20 blur-md grayscale pointer-events-none' : ''}`}>
                             <div className="overflow-x-auto custom-scrollbar">
                                 <table className="w-full border-collapse">
                                     <thead>
                                         <tr className="bg-slate-50/50">
                                             <th className="sticky-col p-6 text-left border-b border-slate-100 min-w-[200px]">
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Ritual Set</span>
-                                                    {(canStillEdit || !isCommitted) && (
-                                                        <button onClick={() => setIsAdding(true)} className="bg-slate-900 text-white w-7 h-7 rounded-xl flex items-center justify-center shadow-lg">+</button>
-                                                    )}
-                                                </div>
+                                                <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Ritual Set</span>
                                             </th>
                                             {gridDays.map(day => {
-                                                const dObj = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+                                                const dObj = new Date(navDate.getFullYear(), navDate.getMonth(), day);
                                                 const isWeekend = dObj.getDay() === 5 || dObj.getDay() === 6;
-                                                const isToday = day === time.getDate() && currentDate.getMonth() === time.getMonth();
+                                                const isT = day === adjustedTime.getUTCDate() && navDate.getMonth() === adjustedTime.getUTCMonth() && navDate.getFullYear() === adjustedTime.getUTCFullYear();
                                                 return (
-                                                    <th key={day} className={`p-4 border-b border-slate-100 min-w-[50px] text-center ${isWeekend ? 'weekend-bg' : ''} ${isToday ? 'bg-indigo-50/50' : ''}`}>
-                                                        <div className={`text-[8px] font-black uppercase mb-0.5 ${isToday ? 'text-indigo-600' : 'text-slate-300'}`}>{day}</div>
-                                                        <div className={`text-[10px] font-black uppercase ${isToday ? 'text-indigo-600' : 'text-slate-400'}`}>
-                                                            {dObj.toLocaleDateString('en', {weekday:'narrow'})}
-                                                        </div>
+                                                    <th key={day} className={`p-4 border-b border-slate-100 min-w-[50px] text-center ${isWeekend ? 'weekend-bg' : ''} ${isT ? 'bg-indigo-50/50' : ''}`}>
+                                                        <div className={`text-[8px] font-black uppercase mb-0.5 ${isT ? 'text-indigo-600' : 'text-slate-300'}`}>{day}</div>
+                                                        <div className={`text-[10px] font-black uppercase ${isT ? 'text-indigo-600' : 'text-slate-400'}`}>{dObj.toLocaleDateString('en', {weekday:'narrow'})}</div>
                                                     </th>
                                                 );
                                             })}
@@ -375,15 +356,16 @@
                                                         <div className="text-2xl">{h.icon}</div>
                                                         <div className="min-w-0">
                                                             <div className="font-bold text-xs lg:text-sm text-slate-800 leading-none mb-1">{h.name}</div>
-                                                            <div className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">Window: {format12h(h.limit)}</div>
+                                                            <div className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">Limit: {format12h(h.limit)}</div>
                                                         </div>
                                                     </div>
                                                 </td>
                                                 {gridDays.map(day => {
-                                                    const key = `${getDayKey(day)}-${h.id}`;
+                                                    const key = getDayKey(day, navDate.getFullYear(), navDate.getMonth()) + '-' + h.id;
                                                     const data = completions[key];
-                                                    const isExpired = day === time.getDate() && currentDate.getMonth() === time.getMonth() && time.getHours() >= h.limit;
-                                                    const dObj = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+                                                    const isT = day === adjustedTime.getUTCDate() && navDate.getMonth() === adjustedTime.getUTCMonth() && navDate.getFullYear() === adjustedTime.getUTCFullYear();
+                                                    const isExpired = isT && currentHour >= h.limit;
+                                                    const dObj = new Date(navDate.getFullYear(), navDate.getMonth(), day);
                                                     const isWeekend = dObj.getDay() === 5 || dObj.getDay() === 6;
 
                                                     return (
@@ -409,32 +391,59 @@
                         </div>
                     </div>
 
-                    {/* MODAL: INTEGRITY LOG SYSTEM */}
+                    {/* MODAL: SETTINGS & INTEL */}
+                    {isInfoOpen && (
+                        <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-6">
+                            <div className="bg-white w-full max-w-xl rounded-[3rem] p-10 shadow-2xl relative animate-fade-in overflow-y-auto max-h-[80vh]">
+                                <button onClick={() => setIsInfoOpen(false)} className="absolute top-8 right-8 text-slate-400 font-black">✕</button>
+                                <h2 className="text-3xl font-black tracking-tighter mb-8">System Configuration</h2>
+                                
+                                <div className="space-y-8">
+                                    <section className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
+                                        <h4 className="font-black text-indigo-600 uppercase text-[10px] tracking-widest mb-4">Time Calibration</h4>
+                                        <div className="flex items-center justify-between gap-4">
+                                            <div className="text-sm font-medium text-slate-600">Manual GMT Offset:</div>
+                                            <select 
+                                                value={systemState.gmtOffset} 
+                                                onChange={(e) => {
+                                                    const newState = { ...systemState, gmtOffset: parseInt(e.target.value) };
+                                                    setSystemState(newState);
+                                                    save(habits, completions, newState);
+                                                }}
+                                                className="bg-white border border-slate-200 p-2 rounded-xl font-bold text-sm"
+                                            >
+                                                {Array.from({length: 27}, (_, i) => i - 12).map(o => (
+                                                    <option key={o} value={o}>GMT {o >= 0 ? '+' : ''}{o}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <p className="text-[10px] text-slate-400 mt-4 leading-relaxed italic">
+                                            Locking to GMT+6 ensures ritual expirations happen exactly at local Dhaka times.
+                                        </p>
+                                    </section>
+                                </div>
+                                <button onClick={() => setIsInfoOpen(false)} className="w-full mt-10 py-5 bg-slate-900 text-white rounded-3xl font-black text-xs uppercase tracking-widest">Save & Close</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* MODAL: LOGS */}
                     {isLogOpen && (
                         <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-6">
                             <div className="bg-white w-full max-w-xl rounded-[3rem] p-10 shadow-2xl relative animate-fade-in flex flex-col max-h-[85vh]">
                                 <button onClick={() => setIsLogOpen(false)} className="absolute top-8 right-8 text-slate-400 font-black">✕</button>
-                                <h2 className="text-3xl font-black tracking-tighter mb-2">Audit Ledger</h2>
-                                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-8 border-b pb-4">Historical Behavioral Truth</p>
-                                
+                                <h2 className="text-3xl font-black tracking-tighter mb-8 border-b pb-4 text-center">Audit Ledger</h2>
                                 <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-2">
-                                    {integrityMetrics.logs.length === 0 ? (
-                                        <div className="py-10 text-center text-slate-300 font-medium italic">No integrity events recorded yet.</div>
-                                    ) : (
-                                        integrityMetrics.logs.map((log, i) => (
-                                            <div key={i} className="flex items-start justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-indigo-100 transition-all">
-                                                <div className="space-y-1">
-                                                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{log.date} • {log.time}</div>
-                                                    <div className="text-sm font-bold text-slate-800 leading-snug">{log.reason}</div>
-                                                </div>
-                                                <div className={`text-sm font-black px-2 py-1 rounded-lg ${log.type === 'plus' ? 'text-emerald-600 bg-emerald-50' : 'text-orange-600 bg-orange-50'}`}>
-                                                    {log.points}
-                                                </div>
+                                    {integrityMetrics.logs.map((log, i) => (
+                                        <div key={i} className="flex items-start justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                            <div className="space-y-1">
+                                                <div className="text-[10px] font-black text-slate-400 uppercase">{log.date} • {log.time}</div>
+                                                <div className="text-sm font-bold text-slate-800">{log.reason}</div>
                                             </div>
-                                        ))
-                                    )}
+                                            <div className={`text-sm font-black px-2 py-1 rounded-lg ${log.type === 'plus' ? 'text-emerald-600 bg-emerald-50' : 'text-orange-600 bg-orange-50'}`}>{log.points}</div>
+                                        </div>
+                                    ))}
                                 </div>
-                                <button onClick={() => setIsLogOpen(false)} className="w-full mt-8 py-5 bg-slate-900 text-white rounded-3xl font-black text-xs uppercase tracking-widest">Close Ledger</button>
                             </div>
                         </div>
                     )}
@@ -445,71 +454,27 @@
                             <div className="bg-white w-full max-w-md rounded-t-[3.5rem] sm:rounded-[4rem] p-10 shadow-2xl border border-white">
                                 <h2 className="text-2xl font-black mb-8 tracking-tighter">Design New Ritual</h2>
                                 <div className="space-y-8">
-                                    <div className="flex gap-3">
-                                        <input type="text" value={newHabit.icon} onChange={e => setNewHabit({...newHabit, icon: e.target.value})} className="w-16 p-4 bg-slate-50 border border-slate-100 rounded-2xl text-2xl text-center outline-none" placeholder="✨" />
-                                        <input type="text" value={newHabit.name} onChange={e => setNewHabit({...newHabit, name: e.target.value})} className="flex-1 p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold outline-none" placeholder="Ritual Name" />
+                                    <div className="space-y-3">
+                                        <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Definition</label>
+                                        <div className="flex gap-3">
+                                            <input type="text" value={newHabit.icon} onChange={e => setNewHabit({...newHabit, icon: e.target.value})} className="w-16 p-4 bg-slate-50 border border-slate-100 rounded-2xl text-2xl text-center outline-none" placeholder="✨" />
+                                            <input type="text" value={newHabit.name} onChange={e => setNewHabit({...newHabit, name: e.target.value})} className="flex-1 p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold outline-none" placeholder="Ritual Name" />
+                                        </div>
                                     </div>
-                                    <div className="flex gap-3">
-                                        {['core', 'support'].map(p => (
-                                            <button key={p} onClick={() => setNewHabit({...newHabit, priority: p})} className={`flex-1 py-4 rounded-2xl text-[10px] font-black uppercase border transition-all ${newHabit.priority === p ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
-                                                {p === 'core' ? '🔥 Core' : '⚪ Support'}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <div className="flex gap-2">
-                                        {['Morning', 'Afternoon', 'Evening'].map(cat => (
-                                            <button key={cat} onClick={() => setNewHabit({...newHabit, category: cat})} className={`flex-1 py-4 rounded-2xl text-[10px] font-black uppercase border transition-all ${newHabit.category === cat ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
-                                                {cat}
-                                            </button>
-                                        ))}
+                                    <div className="space-y-3">
+                                        <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Cycle</label>
+                                        <div className="flex gap-2">
+                                            {['Morning', 'Afternoon', 'Evening'].map(cat => (
+                                                <button key={cat} onClick={() => setNewHabit({...newHabit, category: cat})} className={`flex-1 py-4 rounded-2xl text-[10px] font-black uppercase border transition-all ${newHabit.category === cat ? 'bg-indigo-600 text-white border-indigo-600 shadow-xl shadow-indigo-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+                                                    {cat}
+                                                </button>
+                                            ))}
+                                        </div>
                                     </div>
                                     <div className="flex gap-4 pt-4">
-                                        <button onClick={() => setIsAdding(false)} className="flex-1 py-5 font-black text-slate-400">Discard</button>
-                                        <button onClick={addHabit} className="flex-[2] bg-indigo-600 text-white py-5 rounded-3xl font-black shadow-xl">Establish</button>
+                                        <button onClick={() => setIsAdding(false)} className="flex-1 py-5 font-black text-slate-400 hover:text-slate-600 transition-colors">Discard</button>
+                                        <button onClick={addHabit} className="flex-[2] bg-indigo-600 text-white py-5 rounded-3xl font-black shadow-2xl active:scale-95">Establish</button>
                                     </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* MODAL: INFO */}
-                    {isInfoOpen && (
-                        <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-6">
-                            <div className="bg-white w-full max-w-xl rounded-[3rem] p-10 shadow-2xl relative animate-fade-in overflow-y-auto max-h-[80vh]">
-                                <button onClick={() => setIsInfoOpen(false)} className="absolute top-8 right-8 text-slate-400 font-black">✕</button>
-                                <h2 className="text-3xl font-black tracking-tighter mb-8">System Intel</h2>
-                                <div className="space-y-6 text-slate-600 text-sm leading-relaxed">
-                                    <section>
-                                        <h4 className="font-black text-indigo-600 uppercase text-[10px] tracking-widest mb-1">01. Commitment Grace Period</h4>
-                                        <p>Sealing your commitment locks the day. However, we allow a 15-minute window for schedule corrections.</p>
-                                    </section>
-                                    <section>
-                                        <h4 className="font-black text-indigo-600 uppercase text-[10px] tracking-widest mb-1">02. Integrity Tiers</h4>
-                                        <p>You progress based on honesty points. Retro-checking past days reduces points.</p>
-                                    </section>
-                                </div>
-                                <button onClick={() => setIsInfoOpen(false)} className="w-full mt-10 py-5 bg-slate-900 text-white rounded-3xl font-black text-xs uppercase tracking-widest">Understood</button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* WEEKLY AUTOPSY MODAL */}
-                    {isAutopsyOpen && (
-                        <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-6">
-                            <div className="bg-white w-full max-w-lg rounded-[3.5rem] p-12 shadow-2xl space-y-8 animate-fade-in">
-                                <h2 className="text-3xl font-black tracking-tighter">Weekly Autopsy</h2>
-                                <div className="space-y-6">
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">1. Ritual Impact</label>
-                                        <p className="text-sm font-medium text-slate-600">Which ritual actually moved the needle this week?</p>
-                                        <input type="text" className="w-full p-4 bg-slate-50 rounded-2xl outline-none border border-slate-100" />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">2. Ritual Noise</label>
-                                        <p className="text-sm font-medium text-slate-600">Which ritual felt like shallow performance?</p>
-                                        <input type="text" className="w-full p-4 bg-slate-50 rounded-2xl outline-none border border-slate-100" />
-                                    </div>
-                                    <button onClick={() => setIsAutopsyOpen(false)} className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black text-xs uppercase tracking-widest">Seal Reflection</button>
                                 </div>
                             </div>
                         </div>
@@ -517,7 +482,7 @@
 
                     <div className="fixed bottom-8 right-8 flex flex-col gap-4">
                         <button onClick={() => setIsLogOpen(true)} className="w-16 h-16 bg-white border border-slate-100 shadow-2xl rounded-full flex items-center justify-center text-xl hover:scale-110 active:scale-95 transition-all">📋</button>
-                        <button onClick={() => setIsInfoOpen(true)} className="w-16 h-16 bg-white border border-slate-100 shadow-2xl rounded-full flex items-center justify-center text-xl hover:scale-110 active:scale-95 transition-all">📖</button>
+                        <button onClick={() => setIsInfoOpen(true)} className="w-16 h-16 bg-white border border-slate-100 shadow-2xl rounded-full flex items-center justify-center text-xl hover:scale-110 active:scale-95 transition-all">⚙️</button>
                         <button onClick={() => setIsAutopsyOpen(true)} className="w-16 h-16 bg-white border border-slate-100 shadow-2xl rounded-full flex items-center justify-center text-xl hover:scale-110 active:scale-95 transition-all">🔬</button>
                     </div>
                 </div>
