@@ -13,6 +13,12 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+    <!-- Markdown & LaTeX Engines -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
@@ -39,16 +45,61 @@
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .clock-pulse { animation: pulse 2s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        /* AI Message Styling */
+        .markdown-body h1, .markdown-body h2 { font-weight: 800; margin-top: 1em; margin-bottom: 0.5em; }
+        .markdown-body p { margin-bottom: 0.8em; }
+        .markdown-body ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 1em; }
+        .markdown-body code { background: rgba(0,0,0,0.05); padding: 0.2em 0.4em; border-radius: 4px; font-family: monospace; }
+        .katex-display { margin: 1em 0; overflow-x: auto; overflow-y: hidden; }
     </style>
 </head>
 <body class="text-slate-900">
     <div id="root"></div>
 
     <script type="text/babel">
-        const App = () => {
-            const { useState, useEffect, useMemo } = React;
+        // --- COMPONENTS ---
+        const AiMessage = ({ text, role }) => {
+            const containerRef = React.useRef(null);
 
-            const STORAGE_KEY = 'focuslab_behavioral_v2.9';
+            React.useLayoutEffect(() => {
+                if (containerRef.current) {
+                    // Render math after Markdown is parsed
+                    renderMathInElement(containerRef.current, {
+                        delimiters: [
+                            {left: '$$', right: '$$', display: true},
+                            {left: '$', right: '$', display: false}
+                        ],
+                        throwOnError: false
+                    });
+                }
+            }, [text]);
+
+            const htmlContent = React.useMemo(() => {
+                if (!text) return "";
+                return marked.parse(text);
+            }, [text]);
+
+            return (
+                <div className={`flex ${role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
+                    <div 
+                        ref={containerRef}
+                        className={`max-w-[90%] p-4 rounded-3xl text-sm leading-relaxed markdown-body ${
+                            role === 'user' 
+                            ? 'bg-indigo-600 text-white shadow-lg' 
+                            : 'bg-white border border-slate-200 text-slate-800 shadow-sm'
+                        }`}
+                        dangerouslySetInnerHTML={{ __html: htmlContent }}
+                    />
+                </div>
+            );
+        };
+
+        const App = () => {
+            const { useState, useEffect, useMemo, useRef } = React;
+
+            // --- CONFIG ---
+            const STORAGE_KEY = 'focuslab_behavioral_v3.1_custom_prompt';
             const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
             
             const DEFAULT_HABITS = [
@@ -57,6 +108,8 @@
                 { id: '3', name: 'Hydration', icon: '💧', category: 'Morning', priority: 'support', limit: 11 },
                 { id: '4', name: 'Reading', icon: '📖', category: 'Evening', priority: 'support', limit: 24 }
             ];
+
+            const DEFAULT_PERSONA = "You are a Mindful Productivity Adviser for FocusLab. Focus on keeping words consistent with actions. Use Markdown for formatting. Use LaTeX (inline $...$ or block $$...$$) for any mathematical formulas or intensity equations.";
 
             // --- STATE ---
             const [user, setUser] = useState(null);
@@ -71,15 +124,16 @@
             const [isLogOpen, setIsLogOpen] = useState(false);
             const [isAiOpen, setIsAiOpen] = useState(false);
             const [aiInput, setAiInput] = useState("");
-            const [aiMessages, setAiMessages] = useState([{ role: 'assistant', text: "I am your Mindful Adviser. Let's review your integrity." }]);
+            const [aiMessages, setAiMessages] = useState([{ role: 'assistant', text: "I am your Mindful Adviser. My responses now support **Markdown** and $LaTeX$. How can I assist your focus?" }]);
             const [isAiLoading, setIsAiLoading] = useState(false);
-            const [newHabit, setNewHabit] = useState({ name: '', icon: '✨', target: 7, category: 'Morning', priority: 'support' });
+            const [newHabit, setNewHabit] = useState({ name: '', icon: '✨', category: 'Morning', priority: 'support' });
             const [systemState, setSystemState] = useState({ 
                 mode: 'NORMAL', 
                 lastCommit: '', 
                 commitTime: 0,
                 gmtOffset: 6,
-                geminiKey: '' // Added for user-provided API key
+                geminiKey: '',
+                geminiPersona: DEFAULT_PERSONA
             });
             const [time, setTime] = useState(new Date());
 
@@ -129,7 +183,12 @@
                     setHabits(p.habits || DEFAULT_HABITS);
                     setCompletions(p.completions || {});
                     setActivityLogs(p.activityLogs || []);
-                    if (p.systemState) setSystemState(p.systemState);
+                    if (p.systemState) {
+                        setSystemState({
+                            ...p.systemState,
+                            geminiPersona: p.systemState.geminiPersona || DEFAULT_PERSONA
+                        });
+                    }
                 } else { setHabits(DEFAULT_HABITS); }
             }, []);
 
@@ -156,14 +215,25 @@
                 return updatedLogs;
             };
 
-            // --- AI ADVISER (GEMINI) ---
-            const callGemini = async (userPrompt) => {
-                if (!systemState.geminiKey) {
-                    setAiMessages(p => [...p, { role: 'assistant', text: "Error: No Gemini API Key found. Please add it in Settings (⚙️)." }]);
-                    return;
+            // --- GEMINI API CORE ---
+            const callGemini = async (userPrompt, isJson = false) => {
+                const currentKey = systemState.geminiKey;
+                if (!currentKey) {
+                    setAiMessages(p => [...p, { role: 'assistant', text: "Please add your **Gemini API Key** in Settings (⚙️) to continue." }]);
+                    return null;
                 }
+
                 setIsAiLoading(true);
-                const systemPrompt = `Act as a Mindful Productivity Adviser. User has GMT+${systemState.gmtOffset} offset. Rituals: ${JSON.stringify(habits)}. Activity: ${JSON.stringify(activityLogs.slice(0,5))}. Be concise. Focus on keeping your word.`;
+                const basePersona = systemState.geminiPersona || DEFAULT_PERSONA;
+                const systemPrompt = `${basePersona}
+                
+                CRITICAL CONTEXT:
+                - Timezone: GMT+${systemState.gmtOffset}
+                - Active Rituals: ${JSON.stringify(habits)}
+                - Integrity Score: ${integrityMetrics.pts}
+                - Recent Activity: ${JSON.stringify(activityLogs.slice(0, 5))}
+
+                ${isJson ? 'RESPONSE CONSTRAINT: MUST be valid JSON.' : 'RESPONSE CONSTRAINT: Be sharp, constructive, and behavior-centric.'}`;
                 
                 const fetchWithRetry = async (url, options, retries = 5, delay = 1000) => {
                     try {
@@ -178,18 +248,24 @@
                 };
 
                 try {
-                    const data = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${systemState.geminiKey}`, {
+                    const payload = {
+                        contents: [{ parts: [{ text: userPrompt }] }],
+                        systemInstruction: { parts: [{ text: systemPrompt }] },
+                        generationConfig: { responseMimeType: isJson ? "application/json" : "text/plain" }
+                    };
+
+                    const data = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${currentKey}`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: userPrompt }] }],
-                            systemInstruction: { parts: [{ text: systemPrompt }] }
-                        })
+                        body: JSON.stringify(payload)
                     });
-                    const response = data.candidates?.[0]?.content?.parts?.[0]?.text || "I'm reflecting...";
-                    setAiMessages(p => [...p, { role: 'assistant', text: response }]);
+                    
+                    const response = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (!isJson) setAiMessages(p => [...p, { role: 'assistant', text: response || "My reflection was inconclusive." }]);
+                    return response;
                 } catch (e) {
-                    setAiMessages(p => [...p, { role: 'assistant', text: "Connection error. Please check your API key in Settings." }]);
+                    if (!isJson) setAiMessages(p => [...p, { role: 'assistant', text: "Cloud sync failure. Verify your API key and network." }]);
+                    return null;
                 } finally { setIsAiLoading(false); }
             };
 
@@ -200,14 +276,36 @@
                 setAiInput("");
             };
 
-            // --- ACTIONS ---
+            // --- FEATURES ---
+            const getPerformanceAudit = async () => {
+                const logsSummary = integrityMetrics.logs.slice(0, 10).map(l => `${l.reason} (${l.points})`).join(', ');
+                const prompt = `Review these recent integrity events: [${logsSummary}]. Calculate an Integrity Equation using LaTeX and give me a "Truth Bomb" summary of my behavioral performance.`;
+                setIsAiOpen(true);
+                setAiMessages(p => [...p, { role: 'user', text: "Run Behavioral Integrity Audit" }]);
+                await callGemini(prompt);
+            };
+
+            const craftRitual = async () => {
+                if (!newHabit.name) return;
+                const prompt = `Design a ritual for: "${newHabit.name}". Return JSON: { "icon": "emoji", "category": "Morning/Afternoon/Evening", "priority": "core/support", "reason": "markdown rationale" }`;
+                const result = await callGemini(prompt, true);
+                if (result) {
+                    try {
+                        const sugg = JSON.parse(result);
+                        setNewHabit({ ...newHabit, icon: sugg.icon, category: sugg.category, priority: sugg.priority });
+                        logActivity('ai_ritual_craft', sugg.reason);
+                    } catch (e) {}
+                }
+            };
+
+            // --- CORE LOGIC ---
             const toggle = (day, month, year, habitId) => {
                 const habit = habits.find(h => h.id === habitId);
                 const checkKey = getHabitKey(day, month, year, habitId);
                 const isRealToday = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}` === todayKey;
 
                 if (isRealToday && currentHour >= habit.limit) {
-                    if (!confirm("This window has expired. Proceed as Late Honoring?")) return;
+                    if (!confirm("This window is locked. Proceding will record as Late Honoring (-0.5).")) return;
                 }
 
                 const newC = { ...completions };
@@ -215,14 +313,14 @@
                 else newC[checkKey] = { timestamp: adjustedTime.toISOString(), isLate: !isRealToday };
                 
                 setCompletions(newC);
-                const logs = logActivity('toggle_ritual', habit.name);
+                const logs = logActivity('toggle', habit.name);
                 save(habits, newC, systemState, logs);
             };
 
             const commitToday = () => {
                 const newState = { ...systemState, lastCommit: todayKey, commitTime: Date.now() };
                 setSystemState(newState);
-                const logs = logActivity('commit_lock', todayKey);
+                const logs = logActivity('seal_today', todayKey);
                 save(habits, completions, newState, logs);
             };
 
@@ -238,7 +336,6 @@
                 setNewHabit({ name: '', icon: '✨', category: 'Morning', priority: 'support' });
             };
 
-            // --- ANALYTICS ---
             const format12h = (hour) => {
                 const h = hour % 12 || 12;
                 const ampm = hour >= 12 && hour < 24 ? 'PM' : 'AM';
@@ -247,9 +344,8 @@
 
             const getRemainingText = (habit) => {
                 if (currentHour >= habit.limit) return "Expired";
-                const minsRemaining = (habit.limit * 60) - (currentHour * 60 + currentMinutes);
-                if (minsRemaining > 60) return `${Math.floor(minsRemaining/60)}h remaining`;
-                return `${minsRemaining}m remaining`;
+                const mins = (habit.limit * 60) - (currentHour * 60 + currentMinutes);
+                return mins > 60 ? `${Math.floor(mins/60)}h remaining` : `${Math.max(0, mins)}m left`;
             };
 
             const integrityMetrics = useMemo(() => {
@@ -257,7 +353,8 @@
                 let logs = [];
                 Object.keys(completions).forEach(k => {
                     const c = completions[k];
-                    const [y, m, d, hid] = k.split('-');
+                    const parts = k.split('-'); if (parts.length < 4) return;
+                    const [y, m, d, hid] = parts;
                     const h = habits.find(h => h.id === hid);
                     if (!h) return;
                     if (!c.isLate) pts++; else pts -= 0.5;
@@ -277,19 +374,19 @@
                 return Array.from({length: 7}, (_, i) => Math.max(1, Math.min(total, d - 3 + i)));
             }, [viewMode, viewDate, adjustedTime]);
 
+            // --- UI ---
             return (
                 <div className="pb-10 animate-fade-in px-4 sm:px-10">
                     <div className="max-w-7xl mx-auto space-y-8 mt-10">
                         
-                        {/* HEADER */}
                         <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
                             <div className="space-y-1">
                                 <div className="flex items-center gap-2">
                                     <div className="h-1.5 w-8 bg-slate-900 rounded-full"></div>
-                                    <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">FocusLab Identity</span>
+                                    <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">FocusLab v3.1</span>
                                     <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded bg-slate-100 text-indigo-600`}>{integrityMetrics.title}</span>
                                 </div>
-                                <h1 className="text-4xl lg:text-5xl font-black tracking-tighter">Identity Design</h1>
+                                <h1 className="text-4xl lg:text-5xl font-black tracking-tighter text-slate-800">Identity Design</h1>
                             </div>
                             
                             <div className="flex flex-wrap items-center gap-3 bg-white p-2 rounded-full shadow-lg border border-slate-100">
@@ -298,15 +395,15 @@
                                     <span className="text-xs font-black">{adjustedTime.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true, timeZone:'UTC'})}</span>
                                     <span className="text-[9px] font-bold text-slate-400 border-l border-slate-700 pl-2 uppercase">GMT+{systemState.gmtOffset}</span>
                                 </div>
-                                <button onClick={() => setViewMode(viewMode === 'week' ? 'month' : 'week')} className="px-4 py-2 text-[10px] font-black uppercase text-indigo-600 hover:bg-slate-50 rounded-full">{viewMode === 'week' ? 'Month View' : 'Focus Week'}</button>
+                                <button onClick={() => setViewMode(viewMode === 'week' ? 'month' : 'week')} className="px-4 py-2 text-[10px] font-black uppercase text-indigo-600 hover:bg-slate-50 rounded-full">{viewMode === 'week' ? 'Month' : 'Week'}</button>
                                 <button onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth()-1)))} className="p-2">←</button>
                                 <span className="font-black text-xs uppercase min-w-[80px] text-center">{MONTHS[viewDate.getMonth()]}</span>
                                 <button onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth()+1)))} className="p-2">→</button>
                             </div>
                         </header>
 
-                        {/* DASHBOARD */}
                         <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            {/* PLEDGE */}
                             <div className={`p-8 rounded-[3rem] shadow-xl transition-all duration-500 ${isCommitted ? 'bg-white border border-slate-100' : 'integrity-gradient text-white'}`}>
                                 <h3 className="text-[10px] font-black uppercase tracking-widest mb-4 opacity-60">The Daily Oath</h3>
                                 {!isCommitted ? (
@@ -316,21 +413,22 @@
                                     </div>
                                 ) : (
                                     <div className="space-y-2">
-                                        <div className="text-emerald-500 font-black text-sm uppercase flex items-center gap-2">✓ Promise Sealed</div>
-                                        {canStillEdit && <p className="text-[10px] text-amber-500 font-bold animate-pulse">GRACE PERIOD ACTIVE (15M)</p>}
-                                        <p className="text-slate-500 text-sm italic pt-2">Your rituals are locked for {todayKey}.</p>
+                                        <div className="text-emerald-500 font-black text-sm uppercase flex items-center gap-2">✓ Oath Active</div>
+                                        {canStillEdit && <p className="text-[10px] text-amber-500 font-bold animate-pulse uppercase">Grace window active</p>}
+                                        <p className="text-slate-500 text-sm italic pt-2">System locked for {todayKey}.</p>
                                     </div>
                                 )}
                             </div>
 
+                            {/* NEXT ACTION */}
                             <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-slate-100 group">
-                                <h3 className="text-[10px] font-black uppercase tracking-widest mb-4 text-slate-400">Next Objective</h3>
+                                <h3 className="text-[10px] font-black uppercase tracking-widest mb-4 text-slate-400">Current Focus</h3>
                                 {integrityMetrics.next ? (
                                     <div className="space-y-5">
                                         <div className="text-3xl font-black">{integrityMetrics.next.icon} {integrityMetrics.next.name}</div>
                                         <div className="flex gap-2">
-                                            <span className="text-[9px] font-black uppercase text-indigo-500 bg-indigo-50 px-2 py-1 rounded-lg">{integrityMetrics.next.category} Cycle</span>
-                                            <span className="text-[9px] font-black uppercase text-orange-600 bg-orange-50 px-2 py-1 rounded-lg">Locks {format12h(integrityMetrics.next.limit)}</span>
+                                            <span className="text-[9px] font-black uppercase text-indigo-500 bg-indigo-50 px-2 py-1 rounded-lg">{integrityMetrics.next.category}</span>
+                                            <span className="text-[9px] font-black uppercase text-orange-600 bg-orange-50 px-2 py-1 rounded-lg">Locks at {format12h(integrityMetrics.next.limit)}</span>
                                         </div>
                                         <div className="flex gap-2">
                                             <button disabled={!isCommitted} onClick={() => toggle(adjustedTime.getUTCDate(), adjustedTime.getUTCMonth(), adjustedTime.getUTCFullYear(), integrityMetrics.next.id)} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase shadow-lg disabled:opacity-10">Honor Ritual</button>
@@ -338,16 +436,20 @@
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="flex flex-col items-center justify-center py-4"><span className="text-4xl">🧘</span><div className="font-black text-emerald-500 uppercase text-[10px] mt-2">All Secured</div></div>
+                                    <div className="flex flex-col items-center justify-center py-4"><span className="text-4xl">🧘</span><div className="font-black text-emerald-500 uppercase text-[10px] mt-2">Words Honored</div></div>
                                 )}
                             </div>
 
+                            {/* INTEGRITY SCORE */}
                             <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-slate-100 flex flex-col justify-between">
-                                <div>
-                                    <h3 className="text-[10px] font-black uppercase tracking-widest mb-4 text-slate-400">Balance</h3>
-                                    <div className="text-6xl font-black tracking-tighter">{integrityMetrics.pts}</div>
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <h3 className="text-[10px] font-black uppercase tracking-widest mb-4 text-slate-400">Integrity Pts</h3>
+                                        <div className="text-6xl font-black tracking-tighter text-slate-900">{integrityMetrics.pts}</div>
+                                    </div>
+                                    <button onClick={getPerformanceAudit} className="bg-indigo-50 text-indigo-600 p-3 rounded-2xl hover:bg-indigo-100 transition-all font-black text-[10px] uppercase">✨ AI Audit</button>
                                 </div>
-                                <button onClick={() => setIsLogOpen(true)} className="text-[9px] text-indigo-600 font-bold uppercase hover:underline">View Audit Ledger →</button>
+                                <button onClick={() => setIsLogOpen(true)} className="text-[9px] text-indigo-600 font-bold uppercase hover:underline">View Ledger →</button>
                             </div>
                         </section>
 
@@ -357,12 +459,7 @@
                                 <table className="w-full border-collapse">
                                     <thead>
                                         <tr className="bg-slate-50/50">
-                                            <th className="sticky-col p-6 text-left border-b border-slate-100 min-w-[220px]">
-                                                <div className="flex flex-col gap-1">
-                                                    <span className="text-[10px] font-black uppercase text-slate-400">Ritual System</span>
-                                                    <span className="text-[8px] font-bold text-indigo-600 uppercase">Live Deadlines Active</span>
-                                                </div>
-                                            </th>
+                                            <th className="sticky-col p-6 text-left border-b border-slate-100 min-w-[220px]"><span className="text-[10px] font-black uppercase text-slate-400">Rituals</span></th>
                                             {gridDays.map(day => (
                                                 <th key={day} className="p-4 border-b border-slate-100 min-w-[60px] text-center text-[10px] font-black text-slate-300 uppercase">{day}</th>
                                             ))}
@@ -371,18 +468,14 @@
                                     <tbody className="divide-y divide-slate-50">
                                         {habits.map(h => {
                                             const timeTxt = getRemainingText(h);
-                                            const isUrgent = timeTxt.includes('m remaining') && !timeTxt.includes('Expired');
-                                            
+                                            const isUrgent = timeTxt.includes('left') && !timeTxt.includes('Expired');
                                             return (
                                                 <tr key={h.id} className="group">
                                                     <td className="sticky-col p-6">
                                                         <div className="flex flex-col">
-                                                            <div className="font-bold text-sm">{h.icon} {h.name}</div>
+                                                            <div className="font-bold text-sm text-slate-800">{h.icon} {h.name}</div>
                                                             <div className="flex items-center gap-2 mt-1">
-                                                                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${isUrgent ? 'bg-red-50 text-red-600 animate-pulse' : 'bg-slate-100 text-slate-400'}`}>
-                                                                    {timeTxt}
-                                                                </span>
-                                                                <span className="text-[8px] font-bold text-slate-300 uppercase">at {format12h(h.limit)}</span>
+                                                                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${isUrgent ? 'bg-red-50 text-red-600 animate-pulse' : 'bg-slate-100 text-slate-400'}`}>{timeTxt}</span>
                                                             </div>
                                                         </div>
                                                     </td>
@@ -391,21 +484,10 @@
                                                         const isDone = completions[key];
                                                         const isT = day === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth();
                                                         const expired = isT && currentHour >= h.limit;
-
                                                         return (
                                                             <td key={day} className={`p-2 text-center ${isT ? 'bg-indigo-50/20' : ''}`}>
-                                                                <button 
-                                                                    onClick={() => toggle(day, viewDate.getMonth(), viewDate.getFullYear(), h.id)} 
-                                                                    className={`w-11 h-11 rounded-2xl flex flex-col items-center justify-center mx-auto text-lg transition-all ${
-                                                                        isDone ? 'bg-indigo-600 text-white shadow-lg' : 
-                                                                        expired ? 'bg-slate-100 text-slate-300' : 
-                                                                        'bg-slate-50 text-slate-200 hover:bg-slate-100'
-                                                                    } ${isT && !isDone && isUrgent ? 'border-2 border-red-500 urgent-pulse' : ''}`}
-                                                                >
+                                                                <button onClick={() => toggle(day, viewDate.getMonth(), viewDate.getFullYear(), h.id)} className={`w-11 h-11 rounded-2xl flex flex-col items-center justify-center mx-auto text-lg transition-all ${isDone ? 'bg-indigo-600 text-white shadow-lg' : expired ? 'bg-slate-100 text-slate-300' : 'bg-slate-50 text-slate-200 hover:bg-slate-100'} ${isT && !isDone && isUrgent ? 'border-2 border-red-500 urgent-pulse' : ''}`}>
                                                                     <span>{isDone ? '✓' : expired ? '✕' : '•'}</span>
-                                                                    {isT && !isDone && !expired && (
-                                                                        <span className="text-[7px] font-black opacity-60 uppercase">{h.limit}h</span>
-                                                                    )}
                                                                 </button>
                                                             </td>
                                                         );
@@ -422,54 +504,41 @@
                     {/* AI MODAL */}
                     {isAiOpen && (
                         <div className="fixed inset-0 z-[110] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-4">
-                            <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl h-[80vh] flex flex-col overflow-hidden">
-                                <div className="p-8 bg-indigo-600 text-white flex justify-between">
-                                    <h2 className="text-2xl font-black">Mindful Adviser</h2>
-                                    <button onClick={() => setIsAiOpen(false)}>✕</button>
+                            <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-2xl h-[85vh] flex flex-col overflow-hidden">
+                                <div className="p-8 bg-indigo-600 text-white flex justify-between items-center">
+                                    <div><h2 className="text-2xl font-black">Mindful Adviser</h2><p className="text-[10px] font-bold uppercase opacity-80">Behavioral Intel v3.1</p></div>
+                                    <button onClick={() => setIsAiOpen(false)} className="bg-white/20 p-2 rounded-full">✕</button>
                                 </div>
-                                <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
-                                    {aiMessages.map((m, i) => (
-                                        <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                            <div className={`max-w-[85%] p-4 rounded-3xl text-sm ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-100'}`}>{m.text}</div>
-                                        </div>
-                                    ))}
-                                    {isAiLoading && <div className="text-[10px] font-black text-indigo-400 animate-pulse uppercase">Reflecting...</div>}
+                                <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-slate-50/50">
+                                    {aiMessages.map((m, i) => <AiMessage key={i} text={m.text} role={m.role} />)}
+                                    {isAiLoading && <div className="text-[10px] font-black text-indigo-400 animate-pulse uppercase px-4">Reflecting...</div>}
                                 </div>
-                                <div className="p-6 border-t flex gap-3">
-                                    <input value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAiSend()} className="flex-1 bg-slate-50 p-4 rounded-2xl text-sm outline-none" placeholder="Ask about your performance..." />
+                                <div className="p-6 border-t flex gap-3 bg-white">
+                                    <input value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAiSend()} className="flex-1 bg-slate-50 p-4 rounded-2xl text-sm outline-none border border-slate-100" placeholder="Ask about your performance or $LaTeX$ formulas..." />
                                     <button onClick={handleAiSend} className="bg-indigo-600 text-white px-6 rounded-2xl font-black">→</button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* ADD RITUAL MODAL */}
+                    {/* ADD MODAL */}
                     {isAdding && (
                         <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-6 animate-fade-in">
                             <div className="bg-white w-full max-w-md rounded-t-[3.5rem] sm:rounded-[4rem] p-10 shadow-2xl border border-white space-y-8">
-                                <h2 className="text-2xl font-black">Design New Ritual</h2>
+                                <div className="flex justify-between items-center">
+                                    <h2 className="text-2xl font-black">Design Ritual</h2>
+                                    <button onClick={craftRitual} disabled={!newHabit.name || isAiLoading} className="bg-indigo-50 text-indigo-600 px-4 py-2 rounded-full font-black text-[10px] uppercase disabled:opacity-50">✨ AI Craft</button>
+                                </div>
                                 <div className="space-y-4">
                                     <div className="flex gap-3">
                                         <input type="text" value={newHabit.icon} onChange={e => setNewHabit({...newHabit, icon: e.target.value})} className="w-16 p-4 bg-slate-50 border rounded-2xl text-2xl text-center" placeholder="✨" />
-                                        <input type="text" value={newHabit.name} onChange={e => setNewHabit({...newHabit, name: e.target.value})} className="flex-1 p-4 bg-slate-50 border rounded-2xl font-bold" placeholder="Ritual Name" />
+                                        <input type="text" value={newHabit.name} onChange={e => setNewHabit({...newHabit, name: e.target.value})} className="flex-1 p-4 bg-slate-50 border rounded-2xl font-bold" placeholder="Intent..." />
                                     </div>
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase text-slate-400">Weighting</label>
-                                        <div className="flex gap-2">
-                                            {['core', 'support'].map(p => (
-                                                <button key={p} onClick={() => setNewHabit({...newHabit, priority: p})} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${newHabit.priority === p ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
-                                                    {p === 'core' ? '🔥 Core' : '⚪ Support'}
-                                                </button>
-                                            ))}
-                                        </div>
+                                    <div className="flex gap-2">
+                                        {['core', 'support'].map(p => <button key={p} onClick={() => setNewHabit({...newHabit, priority: p})} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${newHabit.priority === p ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-400'}`}>{p}</button>)}
                                     </div>
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase text-slate-400">Cycle (Time-Lock)</label>
-                                        <div className="flex gap-2">
-                                            {['Morning', 'Afternoon', 'Evening'].map(c => (
-                                                <button key={c} onClick={() => setNewHabit({...newHabit, category: c})} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${newHabit.category === c ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{c}</button>
-                                            ))}
-                                        </div>
+                                    <div className="flex gap-2">
+                                        {['Morning', 'Afternoon', 'Evening'].map(c => <button key={c} onClick={() => setNewHabit({...newHabit, category: c})} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${newHabit.category === c ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50'}`}>{c}</button>)}
                                     </div>
                                 </div>
                                 <div className="flex gap-4">
@@ -480,64 +549,55 @@
                         </div>
                     )}
 
-                    {/* SETTINGS MODAL */}
+                    {/* SETTINGS */}
                     {isInfoOpen && (
                         <div className="fixed inset-0 z-[110] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-6">
-                            <div className="bg-white w-full max-w-xl rounded-[3rem] p-10 shadow-2xl relative animate-fade-in space-y-6">
-                                <h2 className="text-3xl font-black">Configuration</h2>
-                                
-                                <div className="space-y-6">
+                            <div className="bg-white w-full max-w-xl rounded-[3rem] p-10 shadow-2xl relative animate-fade-in space-y-6 flex flex-col max-h-[90vh]">
+                                <h2 className="text-3xl font-black shrink-0">Config</h2>
+                                <div className="space-y-6 overflow-y-auto pr-2 custom-scrollbar">
                                     <div className="p-6 bg-slate-50 rounded-[2rem]">
-                                        <h4 className="text-[10px] font-black uppercase text-indigo-600 mb-4 tracking-widest">Gemini AI Integration</h4>
+                                        <h4 className="text-[10px] font-black text-indigo-600 mb-4 uppercase">Gemini AI Persona</h4>
                                         <div className="space-y-2">
-                                            <label className="text-xs font-bold text-slate-500">API Key:</label>
-                                            <input 
-                                                type="password"
-                                                value={systemState.geminiKey} 
-                                                onChange={e => {
-                                                    const ns = {...systemState, geminiKey: e.target.value};
-                                                    setSystemState(ns); save(habits, completions, ns, activityLogs);
-                                                }}
-                                                placeholder="Paste your Gemini key here..."
-                                                className="w-full p-3 bg-white border border-slate-200 rounded-xl font-mono text-xs outline-none focus:border-indigo-400"
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Base System Prompt</label>
+                                            <textarea 
+                                                value={systemState.geminiPersona} 
+                                                onChange={e => { const ns = {...systemState, geminiPersona: e.target.value}; setSystemState(ns); save(habits, completions, ns, activityLogs); }} 
+                                                placeholder="Define AI Identity..." 
+                                                className="w-full p-4 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-indigo-400 h-32 leading-relaxed"
                                             />
+                                            <p className="text-[9px] text-slate-400 px-1 italic">This prompt defines the Mindful Adviser's persona and constraints.</p>
                                         </div>
                                     </div>
-
                                     <div className="p-6 bg-slate-50 rounded-[2rem]">
-                                        <h4 className="text-[10px] font-black uppercase text-indigo-600 mb-4 tracking-widest">GMT Offset Calibration</h4>
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-sm font-medium">Internal System Timezone:</span>
-                                            <select value={systemState.gmtOffset} onChange={e => {
-                                                const ns = {...systemState, gmtOffset: parseInt(e.target.value)};
-                                                setSystemState(ns); save(habits, completions, ns, activityLogs);
-                                            }} className="p-2 rounded-xl font-bold bg-white border border-slate-200">
-                                                {Array.from({length:27}, (_,i)=>i-12).map(o => <option key={o} value={o}>GMT{o>=0?'+':''}{o}</option>)}
-                                            </select>
-                                        </div>
+                                        <h4 className="text-[10px] font-black text-indigo-600 mb-4 uppercase">API Integration</h4>
+                                        <input type="password" value={systemState.geminiKey} onChange={e => { const ns = {...systemState, geminiKey: e.target.value}; setSystemState(ns); save(habits, completions, ns, activityLogs); }} placeholder="Paste Gemini Key..." className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-indigo-400" />
+                                    </div>
+                                    <div className="p-6 bg-slate-50 rounded-[2rem]">
+                                        <h4 className="text-[10px] font-black text-indigo-600 mb-4 uppercase">GMT Calibration</h4>
+                                        <select value={systemState.gmtOffset} onChange={e => { const ns = {...systemState, gmtOffset: parseInt(e.target.value)}; setSystemState(ns); save(habits, completions, ns, activityLogs); }} className="p-2 rounded-xl font-bold bg-white border border-slate-200">
+                                            {Array.from({length:27}, (_,i)=>i-12).map(o => <option key={o} value={o}>GMT{o>=0?'+':''}{o}</option>)}
+                                        </select>
                                     </div>
                                 </div>
-                                <button onClick={() => setIsInfoOpen(false)} className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black text-xs uppercase">Save & Close</button>
+                                <button onClick={() => setIsInfoOpen(false)} className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black text-xs uppercase shrink-0">Close</button>
                             </div>
                         </div>
                     )}
 
-                    {/* AUDIT LOG MODAL */}
+                    {/* LEDGER */}
                     {isLogOpen && (
                         <div className="fixed inset-0 z-[110] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-6">
                             <div className="bg-white w-full max-w-xl rounded-[3rem] p-10 shadow-2xl relative animate-fade-in flex flex-col max-h-[85vh]">
-                                <h2 className="text-3xl font-black mb-8 border-b pb-4 text-center">Audit Ledger</h2>
+                                <h2 className="text-3xl font-black mb-8 border-b pb-4">Audit Ledger</h2>
                                 <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-2">
                                     {integrityMetrics.logs.map((log, i) => (
-                                        <div key={i} className="flex items-start justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                            <div className="space-y-1">
-                                                <div className="text-[10px] font-black text-slate-400 uppercase">{log.date} • {log.time}</div>
-                                                <div className="text-sm font-bold text-slate-800">{log.reason}</div>
-                                            </div>
+                                        <div key={i} className="flex justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                            <div className="space-y-1"><div className="text-[10px] font-black text-slate-400 uppercase">{log.date} • {log.time}</div><div className="text-sm font-bold text-slate-800">{log.reason}</div></div>
                                             <div className={`text-sm font-black px-2 py-1 rounded-lg ${log.type === 'plus' ? 'text-emerald-600 bg-emerald-50' : 'text-orange-600 bg-orange-50'}`}>{log.points}</div>
                                         </div>
                                     ))}
                                 </div>
+                                <button onClick={() => setIsLogOpen(false)} className="w-full mt-8 py-5 bg-slate-900 text-white rounded-3xl font-black text-xs uppercase">Close</button>
                             </div>
                         </div>
                     )}
