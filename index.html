@@ -95,7 +95,8 @@
             Brain: ({size=24, className=""}) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"></path><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"></path></svg>,
             Edit: ({size=24, className=""}) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>,
             Check: ({size=24, className=""}) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="20 6 9 17 4 12"></polyline></svg>,
-            Menu: ({size=24, className=""}) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+            Menu: ({size=24, className=""}) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>,
+            Link: ({size=24, className=""}) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
         };
 
         // --- CONSTANTS ---
@@ -106,11 +107,15 @@
             { id: '4', name: 'Reading', icon: '📖', category: 'Evening', limit: 24, prompt: 'What insight did you gain?' }
         ];
 
+        const DEFAULT_LINKS = [
+            { id: '1', title: 'Google Calendar', url: 'https://calendar.google.com', icon: '📅' },
+            { id: '2', title: 'Spotify Focus', url: 'https://open.spotify.com', icon: '🎵' }
+        ];
+
         const DEFAULT_PERSONA = "You are the 'Mindful Architect,' a grounded mentor for FocusLab. Integrity is math: $I = \\frac{\\sum Actions}{\\sum Promises}$. Analyze behavioral logs, dashboard stickies, reminders, and habit-specific answers to find why I fail. Use Markdown and LaTeX.";
-        const STORAGE_KEY = 'focuslab_v5.0_journal_clean';
+        const STORAGE_KEY = 'focuslab_v5.6_final_sidebar_fix';
         const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-        // --- COMPONENTS ---
         const AiMessage = React.memo(({ text, role }) => {
             const containerRef = React.useRef(null);
             React.useLayoutEffect(() => {
@@ -153,9 +158,11 @@
             const [reminders, setReminders] = useState([]); 
             const [conversations, setConversations] = useState([]);
             const [quotes, setQuotes] = useState(["Your word is your bond.", "Behavior is the only truth."]);
+            const [quickLinks, setQuickLinks] = useState(DEFAULT_LINKS);
             const [activeChatId, setActiveChatId] = useState(null);
             const [viewDate, setViewDate] = useState(new Date()); 
             
+            // UI Modals & Menus
             const [isAdding, setIsAdding] = useState(false);
             const [editingHabitId, setEditingHabitId] = useState(null);
             const [isInfoOpen, setIsInfoOpen] = useState(false);
@@ -164,17 +171,27 @@
             const [isAiOpen, setIsAiOpen] = useState(false);
             const [isJournalOpen, setIsJournalOpen] = useState(false);
             const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
+            const [isNavSidebarOpen, setIsNavSidebarOpen] = useState(false); // Quick Access Sidebar
+            const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
+            
+            // Dual-Capture Note State
             const [noteType, setNoteType] = useState('reflection'); 
+            
+            // Prompt Feature State
             const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
             const [activePromptHabit, setActivePromptHabit] = useState(null);
             const [pendingCompletionKey, setPendingCompletionKey] = useState(null);
             const [promptInput, setPromptInput] = useState("");
+
             const [journalInput, setJournalInput] = useState("");
             const [aiInput, setAiInput] = useState("");
             const [isAiLoading, setIsAiLoading] = useState(false);
-            const [systemState, setSystemState] = useState({ gmtOffset: 6, geminiKey: '', geminiPersona: DEFAULT_PERSONA, lastCommit: '', commitTime: 0 });
+            const [systemState, setSystemState] = useState({ 
+                gmtOffset: 6, geminiKey: '', geminiPersona: DEFAULT_PERSONA, lastCommit: '', commitTime: 0 
+            });
             const [newHabit, setNewHabit] = useState({ name: '', icon: '✨', category: 'Morning', prompt: '' });
             const [newQuoteInput, setNewQuoteInput] = useState("");
+            const [newLink, setNewLink] = useState({ title: '', url: '', icon: '🔗' });
             const [time, setTime] = useState(new Date());
 
             const services = useMemo(() => {
@@ -199,8 +216,12 @@
             const isCommitted = useMemo(() => systemState.lastCommit === todayKey, [systemState.lastCommit, todayKey]);
             const activeChat = useMemo(() => conversations.find(c => c.id === activeChatId), [conversations, activeChatId]);
 
-            const save = async (h, c, s, logs, journal, chats, q, r) => {
-                const payload = { habits: h, completions: c, systemState: s, activityLogs: logs, journalEntries: journal, conversations: chats, quotes: q, reminders: r };
+            const save = async (h, c, s, logs, journal, chats, q, r, links) => {
+                const payload = { 
+                    habits: h, completions: c, systemState: s, activityLogs: logs, 
+                    journalEntries: journal, conversations: chats, quotes: q, reminders: r,
+                    quickLinks: links
+                };
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
                 if (user && !user.isAnonymous && services) {
                     try { 
@@ -217,15 +238,44 @@
                 return updated;
             };
 
+            // --- LINK MANAGEMENT ---
+            const addQuickLink = () => {
+                if (!newLink.title || !newLink.url) return;
+                const updated = [...quickLinks, { ...newLink, id: Date.now().toString() }];
+                setQuickLinks(updated);
+                setNewLink({ title: '', url: '', icon: '🔗' });
+                setIsLinkModalOpen(false);
+                save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders, updated);
+            };
+
+            const deleteQuickLink = (id) => {
+                if (!confirm("Remove this shortcut?")) return;
+                const updated = quickLinks.filter(l => l.id !== id);
+                setQuickLinks(updated);
+                save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders, updated);
+            };
+
+            // --- AI LOGIC (ROBUST KEY HANDLING) ---
             const callGemini = async (prompt, currentMessages) => {
-                const apiKey = ""; // Managed by environment
+                // FALLBACK KEY CHECK
+                const userKey = systemState.geminiKey;
+                const envKey = typeof apiKey !== 'undefined' ? apiKey : ""; 
+                const effectiveKey = userKey || envKey;
+
+                if (!effectiveKey) {
+                    addAssistantMessage("Critical: No API Key found. Please add your Gemini API Key in Settings (⚙️) to activate me.");
+                    return;
+                }
+                
                 setIsAiLoading(true);
                 const recentJournals = journalEntries.slice(0, 5).map(j => j.text).join('\n');
                 const activeRemindersText = reminders.map(r => r.text).join('\n');
                 const ritualResponses = Object.keys(completions).filter(k => completions[k].answer).slice(-10).map(k => `[Habit Response]: ${completions[k].answer}`).join('\n');
-                const systemPrompt = `${systemState.geminiPersona}\n\nUSER DATA:\nIntegrity Score: ${integrityMetrics.pts}pts\nJournal Notes:\n${recentJournals}\nReminders:\n${activeRemindersText}\nBehavioral Feedback:\n${ritualResponses}`;
+                
+                const systemPrompt = `${systemState.geminiPersona}\n\nUSER DATA:\nIntegrity: ${integrityMetrics.pts}pts\nReflections:\n${recentJournals}\nReminders:\n${activeRemindersText}\nFollow-ups:\n${ritualResponses}`;
+                
                 try {
-                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${effectiveKey}`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
@@ -239,12 +289,25 @@
                             ]
                         })
                     });
+                    
                     const data = await res.json();
-                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "Architect silent.";
+                    
+                    if (data.error) {
+                        throw new Error(data.error.message);
+                    }
+
+                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "The Architect is silent (No content generated).";
                     const updated = conversations.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, { role: 'assistant', text }], lastUpdated: new Date().toISOString() } : c);
                     setConversations(updated);
-                    save(habits, completions, systemState, activityLogs, journalEntries, updated, quotes, reminders);
-                } catch (e) {} finally { setIsAiLoading(false); }
+                    save(habits, completions, systemState, activityLogs, journalEntries, updated, quotes, reminders, quickLinks);
+                } catch (e) {
+                    addAssistantMessage(`Adviser Error: ${e.message}`);
+                } finally { setIsAiLoading(false); }
+            };
+
+            const addAssistantMessage = (msg) => {
+                const updated = conversations.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, { role: 'assistant', text: msg }] } : c);
+                setConversations(updated);
             };
 
             const handleAiSend = () => {
@@ -252,13 +315,14 @@
                 const prompt = aiInput; setAiInput("");
                 const updated = conversations.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, { role: 'user', text: prompt }], lastUpdated: new Date().toISOString() } : c);
                 setConversations(updated);
-                callGemini(prompt, updated.find(c => c.id === activeChatId).messages);
+                const currentSession = updated.find(c => c.id === activeChatId);
+                callGemini(prompt, currentSession.messages);
             };
 
             const createNewChat = () => {
-                const newChat = { id: Date.now().toString(), title: `Chat ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`, messages: [{ role: 'assistant', text: "Adviser present. I've synced your latest notes and reminders. How shall we begin?" }], lastUpdated: new Date().toISOString() };
+                const newChat = { id: Date.now().toString(), title: `Session ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`, messages: [{ role: 'assistant', text: "Adviser present. Ready to analyze your integrity data. Where shall we begin?" }], lastUpdated: new Date().toISOString() };
                 const updated = [newChat, ...conversations]; setConversations(updated); setActiveChatId(newChat.id);
-                save(habits, completions, systemState, activityLogs, journalEntries, updated, quotes, reminders);
+                save(habits, completions, systemState, activityLogs, journalEntries, updated, quotes, reminders, quickLinks);
             };
 
             const toggleHabit = (day, habit) => {
@@ -269,7 +333,7 @@
                 if (newC[key]) {
                     delete newC[key];
                     setCompletions(newC);
-                    save(habits, newC, systemState, logActivity('untoggle', habit.name), journalEntries, conversations, quotes, reminders);
+                    save(habits, newC, systemState, logActivity('untoggle', habit.name), journalEntries, conversations, quotes, reminders, quickLinks);
                 } else {
                     if (expired && !confirm("Marking this as LATE (-0.5 pts)?")) return;
                     if (habit.prompt) {
@@ -277,7 +341,7 @@
                     } else {
                         newC[key] = { timestamp: adjustedTime.toISOString(), isLate: !isT || expired };
                         setCompletions(newC);
-                        save(habits, newC, systemState, logActivity('toggle', habit.name), journalEntries, conversations, quotes, reminders);
+                        save(habits, newC, systemState, logActivity('toggle', habit.name), journalEntries, conversations, quotes, reminders, quickLinks);
                     }
                 }
             };
@@ -289,7 +353,7 @@
                 const expired = isT && currentHour >= (habit.limit || 24);
                 const newC = { ...completions, [key]: { timestamp: adjustedTime.toISOString(), isLate: !isT || expired, answer: promptInput } };
                 setCompletions(newC);
-                save(habits, newC, systemState, logActivity('toggle', habit.name + ' (w/ answer)'), journalEntries, conversations, quotes, reminders);
+                save(habits, newC, systemState, logActivity('toggle', habit.name + ' (w/ answer)'), journalEntries, conversations, quotes, reminders, quickLinks);
                 setIsPromptModalOpen(false); setActivePromptHabit(null); setPendingCompletionKey(null);
             };
 
@@ -305,7 +369,7 @@
                     logActivity('add_ritual', newHabit.name);
                 }
                 setHabits(updated);
-                save(updated, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders);
+                save(updated, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders, quickLinks);
                 setNewHabit({ name: '', icon: '✨', category: 'Morning', prompt: '' }); setEditingHabitId(null); setIsAdding(false);
             };
 
@@ -313,7 +377,7 @@
                 if (!confirm("Permanently retire this ritual?")) return;
                 const updated = habits.filter(h => h.id !== id);
                 setHabits(updated);
-                save(updated, completions, systemState, logActivity('delete_ritual', 'ID: '+id), journalEntries, conversations, quotes, reminders);
+                save(updated, completions, systemState, logActivity('delete_ritual', 'ID: '+id), journalEntries, conversations, quotes, reminders, quickLinks);
             };
 
             const integrityMetrics = useMemo(() => {
@@ -337,6 +401,7 @@
                 return `${hour}:00 ${limit >= 12 ? 'PM' : 'AM'}`;
             };
 
+            // --- INIT ---
             useEffect(() => {
                 const timer = setInterval(() => setTime(new Date()), 60000);
                 const local = localStorage.getItem(STORAGE_KEY);
@@ -348,6 +413,7 @@
                     if (p.conversations?.length) setActiveChatId(p.conversations[0].id);
                     if (p.quotes) setQuotes(p.quotes);
                     if (p.reminders) setReminders(p.reminders);
+                    if (p.quickLinks) setQuickLinks(p.quickLinks);
                 }
                 return () => clearInterval(timer);
             }, []);
@@ -366,24 +432,55 @@
             }, [services]);
 
             return (
-                <div className="pb-24 px-4 sm:px-10 max-w-7xl mx-auto space-y-10 mt-6 md:mt-10 animate-fade-in">
+                <div className="pb-24 px-4 sm:px-10 max-w-7xl mx-auto space-y-10 mt-6 md:mt-10 animate-fade-in relative">
                     
+                    {/* QUICK ACCESS SIDEBAR */}
+                    <div className={`fixed top-0 left-0 h-full w-72 bg-white shadow-2xl z-[60] transform transition-transform duration-300 ${isNavSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+                        <div className="p-8 border-b flex justify-between items-center">
+                            <h2 className="text-xl font-black text-slate-900 tracking-tight">Quick Access</h2>
+                            <button onClick={() => setIsNavSidebarOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">✕</button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+                            {quickLinks.map(link => (
+                                <div key={link.id} className="flex items-center justify-between p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 transition-all group">
+                                    <a href={link.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 flex-1">
+                                        <span className="text-xl">{link.icon}</span>
+                                        <span className="text-sm font-bold text-slate-700">{link.title}</span>
+                                    </a>
+                                    <button onClick={() => deleteQuickLink(link.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Icons.Trash size={14} /></button>
+                                </div>
+                            ))}
+                            {quickLinks.length === 0 && <div className="text-center text-slate-400 text-xs italic py-10">Add tools for quick access.</div>}
+                        </div>
+                        <div className="p-6 border-t bg-slate-50/50">
+                            <button onClick={() => setIsLinkModalOpen(true)} className="w-full py-4 bg-white border border-slate-200 text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2">
+                                <Icons.Plus size={14} /> Add Tool
+                            </button>
+                        </div>
+                    </div>
+                    {isNavSidebarOpen && <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-[50]" onClick={() => setIsNavSidebarOpen(false)} />}
+
                     {/* HEADER */}
-                    <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 bg-white p-6 md:p-10 rounded-[3rem] shadow-sm border border-slate-100">
-                        <div className="space-y-4 w-full md:w-auto">
-                            <div className="space-y-1">
-                                <div className="flex items-center gap-3">
-                                    <span className="h-2 w-2 bg-indigo-600 rounded-full animate-pulse" />
-                                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">{integrityMetrics.title}</span>
+                    <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 bg-white p-6 md:p-10 rounded-[3rem] shadow-sm border border-slate-100 relative z-40">
+                        <div className="flex items-center gap-6 w-full md:w-auto">
+                             <button onClick={() => setIsNavSidebarOpen(true)} className="w-12 h-12 rounded-2xl bg-white border border-slate-200 flex items-center justify-center hover:bg-slate-50 hover:border-indigo-200 transition-all shadow-sm">
+                                <Icons.Menu size={24} className="text-slate-600" />
+                            </button>
+                            <div className="space-y-4">
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-3">
+                                        <span className="h-2 w-2 bg-indigo-600 rounded-full animate-pulse" />
+                                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">{integrityMetrics.title}</span>
+                                    </div>
+                                    <h1 className="text-4xl md:text-6xl font-black tracking-tighter text-slate-900 leading-none">Identity Evolution</h1>
                                 </div>
-                                <h1 className="text-4xl md:text-6xl font-black tracking-tighter text-slate-900 leading-none">Identity Evolution</h1>
-                            </div>
-                            <div className="w-full md:w-64">
-                                <div className="flex justify-between text-[8px] font-black uppercase text-slate-400 mb-1 tracking-widest">
-                                    <span>Progress: {Math.round(integrityMetrics.progress)}%</span>
-                                </div>
-                                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                                    <div className="h-full bg-indigo-600 transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(79,70,229,0.4)]" style={{ width: `${integrityMetrics.progress}%` }} />
+                                <div className="w-full md:w-64">
+                                    <div className="flex justify-between text-[8px] font-black uppercase text-slate-400 mb-1 tracking-widest">
+                                        <span>Progress: {Math.round(integrityMetrics.progress)}%</span>
+                                    </div>
+                                    <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                                        <div className="h-full bg-indigo-600 transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(79,70,229,0.4)]" style={{ width: `${integrityMetrics.progress}%` }} />
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -399,7 +496,7 @@
                     <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className={`p-8 rounded-[3.5rem] shadow-xl transition-all duration-500 flex flex-col justify-between min-h-[220px] ${isCommitted ? 'bg-white border' : 'integrity-gradient text-white shadow-indigo-200/50'}`}>
                             <div><h3 className="text-[10px] font-black uppercase opacity-60 mb-2 tracking-widest">Daily Oath</h3>{!isCommitted ? <p className="text-lg font-bold leading-tight">Commit your word to unlock the grid.</p> : <p className="text-lg font-bold italic text-slate-800">Identity locked. Rituals active.</p>}</div>
-                            {!isCommitted && <button onClick={() => { const ns = {...systemState, lastCommit: todayKey, commitTime: Date.now()}; setSystemState(ns); save(habits, completions, ns, logActivity('commit', todayKey), journalEntries, conversations, quotes, reminders); }} className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black shadow-xl hover:scale-105 active:scale-95 transition-all">Seal Today</button>}
+                            {!isCommitted && <button onClick={() => { const ns = {...systemState, lastCommit: todayKey, commitTime: Date.now()}; setSystemState(ns); save(habits, completions, ns, logActivity('commit', todayKey), journalEntries, conversations, quotes, reminders, quickLinks); }} className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black shadow-xl hover:scale-105 active:scale-95 transition-all">Seal Today</button>}
                         </div>
                         <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border flex flex-col justify-center items-center group text-center"><div className="text-7xl font-black tracking-tighter group-hover:text-indigo-600 transition-colors">{integrityMetrics.pts}</div><div className="text-[10px] font-black uppercase text-slate-400 mt-2 tracking-[0.2em]">Honesty Quotient</div></div>
                         <div className="bg-indigo-600 p-8 rounded-[3.5rem] shadow-xl text-white flex flex-col justify-between relative overflow-hidden"><div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl" /><p className="text-sm font-medium opacity-90 italic z-10 text-white">"Identity is establishing a history of kept promises."</p><button onClick={() => { setNoteType('reflection'); setIsJournalOpen(true); }} className="w-full py-4 bg-white text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-50 transition-all z-10 text-center">Capture Truth 📝</button></div>
@@ -449,15 +546,15 @@
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-10 px-4 pb-20">
                             {quotes.map((q, i) => (
-                                <div key={`quote-${i}`} className="dashboard-sticky p-10 min-h-[220px] relative transform rotate-[-2deg] flex items-center justify-center text-center group"><div className="sticky-pin" /><button onClick={() => { const nq = quotes.filter((_, idx) => idx !== i); setQuotes(nq); save(habits, completions, systemState, activityLogs, journalEntries, conversations, nq, reminders); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-600 transition-all"><Icons.Trash size={14} /></button><p className="text-2xl font-bold text-slate-700 italic leading-tight">"{q}"</p></div>
+                                <div key={`quote-${i}`} className="dashboard-sticky p-10 min-h-[220px] relative transform rotate-[-2deg] flex items-center justify-center text-center group"><div className="sticky-pin" /><button onClick={() => { const nq = quotes.filter((_, idx) => idx !== i); setQuotes(nq); save(habits, completions, systemState, activityLogs, journalEntries, conversations, nq, reminders, quickLinks); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-600 transition-all"><Icons.Trash size={14} /></button><p className="text-2xl font-bold text-slate-700 italic leading-tight">"{q}"</p></div>
                             ))}
                             {reminders.map((r, i) => (
-                                <div key={`rem-${i}`} className="dashboard-sticky dashboard-sticky-reminder p-10 min-h-[220px] relative transform rotate-[-1deg] group flex flex-col justify-center text-center"><div className="sticky-pin" /><button onClick={() => { const ur = reminders.filter(rm => rm.timestamp !== r.timestamp); setReminders(ur); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, ur); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-600 transition-all"><Icons.Trash size={14} /></button><span className="text-[10px] font-black text-red-500 uppercase tracking-[0.2em] mb-4">Identity Reminder</span><p className="text-xl font-bold text-red-900 leading-tight">"{r.text}"</p></div>
+                                <div key={`rem-${i}`} className="dashboard-sticky dashboard-sticky-reminder p-10 min-h-[220px] relative transform rotate-[-1deg] group flex flex-col justify-center text-center"><div className="sticky-pin" /><button onClick={() => { const ur = reminders.filter(rm => rm.timestamp !== r.timestamp); setReminders(ur); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, ur, quickLinks); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-600 transition-all"><Icons.Trash size={14} /></button><span className="text-[10px] font-black text-red-500 uppercase tracking-[0.2em] mb-4">Identity Reminder</span><p className="text-xl font-bold text-red-900 leading-tight">"{r.text}"</p></div>
                             ))}
                         </div>
                     </div>
 
-                    {/* MODALS */}
+                    {/* MODALS SECTION */}
                     <React.Fragment>
                         {isPromptModalOpen && (
                             <div className="fixed inset-0 z-[140] bg-slate-900/60 backdrop-blur-xl flex items-center justify-center p-4 animate-fade-in">
@@ -469,6 +566,23 @@
                                     <div className="flex gap-4">
                                         <button onClick={() => setIsPromptModalOpen(false)} className="flex-1 py-4 font-black text-slate-400 uppercase text-xs tracking-widest">Skip</button>
                                         <button onClick={finalizePromptCompletion} className="flex-[2] bg-indigo-600 text-white py-5 rounded-[2rem] font-black shadow-xl hover:bg-indigo-700 transition-all uppercase text-xs tracking-widest hover:scale-105">Log Insight</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {isLinkModalOpen && (
+                            <div className="fixed inset-0 z-[140] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+                                <div className="bg-white w-full max-w-md rounded-[3rem] p-10 shadow-2xl border border-white space-y-6 flex flex-col">
+                                    <h2 className="text-2xl font-black text-center text-slate-900">Add Quick Link</h2>
+                                    <div className="space-y-4">
+                                        <input type="text" value={newLink.icon} onChange={e => setNewLink({...newLink, icon: e.target.value})} placeholder="Icon (e.g., 📅)" className="w-full p-4 bg-slate-50 rounded-2xl outline-none text-center text-2xl" />
+                                        <input type="text" value={newLink.title} onChange={e => setNewLink({...newLink, title: e.target.value})} placeholder="Title (e.g., Calendar)" className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold" />
+                                        <input type="text" value={newLink.url} onChange={e => setNewLink({...newLink, url: e.target.value})} placeholder="URL (https://...)" className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-mono text-sm" />
+                                    </div>
+                                    <div className="flex gap-4">
+                                        <button onClick={() => setIsLinkModalOpen(false)} className="flex-1 py-4 font-black text-slate-400 uppercase text-xs">Cancel</button>
+                                        <button onClick={addQuickLink} className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-lg uppercase text-xs">Add Link</button>
                                     </div>
                                 </div>
                             </div>
@@ -493,10 +607,10 @@
                                         <button onClick={() => { 
                                             if (noteType === 'reflection') {
                                                 const u = [{ timestamp: new Date().toISOString(), text: journalInput }, ...journalEntries]; setJournalEntries(u); setIsJournalOpen(false); setJournalInput("");
-                                                save(habits, completions, systemState, logActivity('reflection', 'Sealed'), u, conversations, quotes, reminders);
+                                                save(habits, completions, systemState, logActivity('reflection', 'Sealed'), u, conversations, quotes, reminders, quickLinks);
                                             } else {
                                                 const u = [{ timestamp: new Date().toISOString(), text: journalInput }, ...reminders]; setReminders(u); setIsJournalOpen(false); setJournalInput("");
-                                                save(habits, completions, systemState, logActivity('reminder', 'Pinned'), journalEntries, conversations, quotes, u);
+                                                save(habits, completions, systemState, logActivity('reminder', 'Pinned'), journalEntries, conversations, quotes, u, quickLinks);
                                             }
                                         }} className={`flex-[2] py-5 rounded-[2rem] font-black shadow-xl uppercase text-xs hover:scale-105 transition-all text-white ${noteType === 'reflection' ? 'bg-slate-900' : 'bg-red-500'}`}>{noteType === 'reflection' ? 'Save to Ledger' : 'Pin to Board'}</button>
                                     </div>
@@ -568,8 +682,8 @@
                                 <div className="bg-white w-full max-w-xl rounded-[4rem] p-12 shadow-2xl space-y-8 animate-fade-in flex flex-col max-h-[90vh]">
                                     <h2 className="text-4xl font-black">Configuration</h2>
                                     <div className="space-y-6 overflow-y-auto pr-2 custom-scrollbar">
-                                        <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4">
-                                            <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest text-center">Pinboard Anchors</h4>
+                                        <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4 text-center">
+                                            <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Pinboard Anchors</h4>
                                             <div className="flex gap-2">
                                                 <input type="text" value={newQuoteInput} onChange={(e) => setNewQuoteInput(e.target.value)} placeholder="Add anchor..." className="flex-1 p-3 bg-white border rounded-xl text-xs outline-none shadow-inner" onKeyPress={e => e.key === 'Enter' && (setQuotes([...quotes, newQuoteInput]), setNewQuoteInput(''))} />
                                                 <button onClick={() => { if(!newQuoteInput) return; setQuotes([...quotes, newQuoteInput]); setNewQuoteInput(''); }} className="bg-indigo-600 text-white px-4 rounded-xl font-bold shadow-lg">+</button>
@@ -593,11 +707,12 @@
                                             <select value={systemState.gmtOffset} onChange={e => setSystemState({...systemState, gmtOffset: parseInt(e.target.value)})} className="p-3 w-full rounded-2xl font-bold bg-white border outline-none text-sm text-center shadow-sm">{Array.from({length:27}, (_,i)=>i-12).map(o => <option key={o} value={o}>GMT {o>=0?'+':''}{o}</option>)}</select>
                                         </div>
                                     </div>
-                                    <button onClick={() => { setIsInfoOpen(false); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders); }} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl active:scale-95 transition-all">Save & Close</button>
+                                    <button onClick={() => { setIsInfoOpen(false); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders, quickLinks); }} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl active:scale-95 transition-all">Save & Close</button>
                                 </div>
                             </div>
                         )}
 
+                        {/* LEDGER MODAL */}
                         {isLogOpen && (
                             <div className="fixed inset-0 z-[120] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-4 md:p-6">
                                 <div className="bg-white w-full max-w-4xl rounded-[4rem] p-10 shadow-2xl relative flex flex-col max-h-[85vh]">
@@ -618,7 +733,7 @@
                                                         <div className="absolute -left-[21px] top-0 w-3 h-3 rounded-full bg-slate-200 border-2 border-white ring-2 ring-indigo-50" />
                                                         <div className="flex justify-between items-start mb-2">
                                                             <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{new Date(e.timestamp).toLocaleString()}</span>
-                                                            <button onClick={() => { if(confirm("Permanently erase this record?")) { const u = journalEntries.filter(je => je.timestamp !== e.timestamp); setJournalEntries(u); save(habits, completions, systemState, activityLogs, u, conversations, quotes, reminders); } }} className="text-slate-300 hover:text-red-500 transition-colors"><Icons.Trash size={14} /></button>
+                                                            <button onClick={() => { if(confirm("Permanently erase this record?")) { const u = journalEntries.filter(je => je.timestamp !== e.timestamp); setJournalEntries(u); save(habits, completions, systemState, activityLogs, u, conversations, quotes, reminders, quickLinks); } }} className="text-slate-300 hover:text-red-500 transition-colors"><Icons.Trash size={14} /></button>
                                                         </div>
                                                         <p className="text-sm text-slate-700 leading-relaxed font-sans border-l-2 border-indigo-100 pl-4 py-1">{e.text}</p>
                                                     </div>
@@ -626,7 +741,7 @@
                                                 {journalEntries.length === 0 && <div className="text-center py-20 text-slate-300 font-medium italic">Timeline clear. Begin your observation log.</div>}
                                             </div>
                                         )}
-                                        {logTab === 'reminders' && (<div className="grid grid-cols-1 md:grid-cols-2 gap-6">{reminders.map((r, i) => (<div key={i} className={`dashboard-sticky dashboard-sticky-reminder p-8 rounded-sm transform ${i % 2 === 0 ? 'rotate-1' : '-rotate-1'} group`}><div className="sticky-pin" /><div className="flex justify-between items-start mb-4"><span className="text-[9px] font-black text-red-400 uppercase tracking-widest">Active Reminder</span><button onClick={() => { const ur = reminders.filter(rm => rm.timestamp !== r.timestamp); setReminders(ur); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, ur); }} className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all">✕</button></div><p className="text-lg font-bold text-red-900 leading-tight">"{r.text}"</p></div>))}</div>)}
+                                        {logTab === 'reminders' && (<div className="grid grid-cols-1 md:grid-cols-2 gap-6">{reminders.map((r, i) => (<div key={i} className={`dashboard-sticky dashboard-sticky-reminder p-8 rounded-sm transform ${i % 2 === 0 ? 'rotate-1' : '-rotate-1'} group`}><div className="sticky-pin" /><div className="flex justify-between items-start mb-4"><span className="text-[9px] font-black text-red-400 uppercase tracking-widest">Active Reminder</span><button onClick={() => { const ur = reminders.filter(rm => rm.timestamp !== r.timestamp); setReminders(ur); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, ur, quickLinks); }} className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all"><Icons.Trash size={14} /></button></div><p className="text-lg font-bold text-red-900 leading-tight">"{r.text}"</p></div>))}</div>)}
                                     </div>
                                 </div>
                             </div>
