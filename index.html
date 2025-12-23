@@ -32,6 +32,8 @@
         .weekend-bg { background-color: #fef2f2; }
         .check-anim { transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); }
         .check-anim:active { scale: 0.9; }
+        .urgent-pulse { animation: borderPulse 2s infinite; }
+        @keyframes borderPulse { 0% { border-color: #ef4444; } 50% { border-color: #fee2e2; } 100% { border-color: #ef4444; } }
         @media (max-width: 640px) { .sticky-col { min-width: 130px !important; } }
         .animate-fade-in { animation: fadeIn 0.3s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -44,11 +46,10 @@
 
     <script type="text/babel">
         const App = () => {
-            const { useState, useEffect, useMemo, useRef } = React;
+            const { useState, useEffect, useMemo } = React;
 
-            const STORAGE_KEY = 'focuslab_behavioral_v2.6';
+            const STORAGE_KEY = 'focuslab_behavioral_v2.9';
             const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-            const apiKey = ""; // Gemini API Key (handled by environment)
             
             const DEFAULT_HABITS = [
                 { id: '1', name: 'Deep Work', icon: '💻', category: 'Morning', priority: 'core', limit: 11 },
@@ -62,7 +63,7 @@
             const [habits, setHabits] = useState([]);
             const [completions, setCompletions] = useState({});
             const [activityLogs, setActivityLogs] = useState([]);
-            const [currentDate, setCurrentDate] = useState(new Date()); 
+            const [viewDate, setViewDate] = useState(new Date()); 
             const [viewMode, setViewMode] = useState('week');
             const [isAdding, setIsAdding] = useState(false);
             const [isInfoOpen, setIsInfoOpen] = useState(false);
@@ -70,19 +71,19 @@
             const [isLogOpen, setIsLogOpen] = useState(false);
             const [isAiOpen, setIsAiOpen] = useState(false);
             const [aiInput, setAiInput] = useState("");
-            const [aiMessages, setAiMessages] = useState([{ role: 'assistant', text: "Peace be upon you. I am your Mindful Adviser. How can we strengthen your integrity today?" }]);
+            const [aiMessages, setAiMessages] = useState([{ role: 'assistant', text: "I am your Mindful Adviser. Let's review your integrity." }]);
             const [isAiLoading, setIsAiLoading] = useState(false);
             const [newHabit, setNewHabit] = useState({ name: '', icon: '✨', target: 7, category: 'Morning', priority: 'support' });
             const [systemState, setSystemState] = useState({ 
                 mode: 'NORMAL', 
                 lastCommit: '', 
                 commitTime: 0,
-                gmtOffset: 6 
+                gmtOffset: 6,
+                geminiKey: '' // Added for user-provided API key
             });
             const [time, setTime] = useState(new Date());
-            const [navDate, setNavDate] = useState(new Date());
 
-            // --- CLOCK & GMT LOGIC ---
+            // --- CLOCK & GMT ENGINE ---
             useEffect(() => {
                 const timer = setInterval(() => setTime(new Date()), 1000);
                 return () => clearInterval(timer);
@@ -93,22 +94,23 @@
                 return new Date(utc + (3600000 * systemState.gmtOffset));
             }, [time, systemState.gmtOffset]);
 
-            const current12hTime = adjustedTime.toLocaleTimeString('en-US', { 
-                hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'UTC' 
-            });
-            
             const currentHour = adjustedTime.getUTCHours();
-            const currentPhase = currentHour < 12 ? 'Morning' : currentHour < 17 ? 'Afternoon' : 'Evening';
+            const currentMinutes = adjustedTime.getUTCMinutes();
             
-            function getDayKey(day, year, month) {
-                return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            }
+            const getHabitKey = (day, month, year, habitId) => {
+                const m = String(month + 1).padStart(2, '0');
+                const d = String(day).padStart(2, '0');
+                return `${year}-${m}-${d}-${habitId}`;
+            };
 
             const todayKey = useMemo(() => {
-                return getDayKey(adjustedTime.getUTCDate(), adjustedTime.getUTCFullYear(), adjustedTime.getUTCMonth());
-            }, [adjustedTime.getUTCDate(), adjustedTime.getUTCMonth(), adjustedTime.getUTCFullYear()]);
+                const y = adjustedTime.getUTCFullYear();
+                const m = String(adjustedTime.getUTCMonth() + 1).padStart(2, '0');
+                const d = String(adjustedTime.getUTCDate()).padStart(2, '0');
+                return `${y}-${m}-${d}`;
+            }, [adjustedTime]);
 
-            // --- FIREBASE CONFIG ---
+            // --- FIREBASE & DATA SYNC ---
             const firebaseConfig = window.__firebase_config ? JSON.parse(window.__firebase_config) : { apiKey: "" };
             const appId = window.__app_id || 'focuslab-integrity';
             const services = useMemo(() => {
@@ -120,7 +122,6 @@
                 } catch (e) { return null; }
             }, []);
 
-            // --- DATA LOADING & SYNC ---
             useEffect(() => {
                 const local = localStorage.getItem(STORAGE_KEY);
                 if (local) {
@@ -149,290 +150,383 @@
             };
 
             const logActivity = (action, details) => {
-                const newLog = {
-                    timestamp: new Date().toISOString(),
-                    action,
-                    details
-                };
-                const updatedLogs = [newLog, ...activityLogs].slice(0, 50); // Keep last 50
+                const newLog = { timestamp: new Date().toISOString(), action, details };
+                const updatedLogs = [newLog, ...activityLogs].slice(0, 50);
                 setActivityLogs(updatedLogs);
                 return updatedLogs;
             };
 
-            // --- AI GEMINI INTEGRATION ---
+            // --- AI ADVISER (GEMINI) ---
             const callGemini = async (userPrompt) => {
+                if (!systemState.geminiKey) {
+                    setAiMessages(p => [...p, { role: 'assistant', text: "Error: No Gemini API Key found. Please add it in Settings (⚙️)." }]);
+                    return;
+                }
                 setIsAiLoading(true);
-                const systemInstruction = `You are the Mindful Productivity Adviser for FocusLab. 
-                Focus on integrity, behavioral truth, and non-judgmental accountability.
-                User Data Provided: 
-                - Current GMT Offset: ${systemState.gmtOffset}
-                - Rituals: ${JSON.stringify(habits)}
-                - Recent Activity: ${JSON.stringify(activityLogs.slice(0, 10))}
-                - Points: ${integrityMetrics.points} (${integrityMetrics.title})
-                Advice should be concise, behavior-forcing, and culturally aware (Bangladesh context). 
-                If the user asks for app data, summarize their performance honestly.`;
-
-                const fetchWithRetry = async (url, options, retries = 5, backoff = 1000) => {
+                const systemPrompt = `Act as a Mindful Productivity Adviser. User has GMT+${systemState.gmtOffset} offset. Rituals: ${JSON.stringify(habits)}. Activity: ${JSON.stringify(activityLogs.slice(0,5))}. Be concise. Focus on keeping your word.`;
+                
+                const fetchWithRetry = async (url, options, retries = 5, delay = 1000) => {
                     try {
-                        const response = await fetch(url, options);
-                        if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-                        return await response.json();
-                    } catch (error) {
-                        if (retries > 0) {
-                            await new Promise(res => setTimeout(res, backoff));
-                            return fetchWithRetry(url, options, retries - 1, backoff * 2);
-                        }
-                        throw error;
+                        const res = await fetch(url, options);
+                        if (!res.ok) throw new Error();
+                        return await res.json();
+                    } catch (e) {
+                        if (retries === 0) throw e;
+                        await new Promise(r => setTimeout(r, delay));
+                        return fetchWithRetry(url, options, retries - 1, delay * 2);
                     }
                 };
 
                 try {
-                    const data = await fetchWithRetry(
-                        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`,
-                        {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                                contents: [{ parts: [{ text: userPrompt }] }],
-                                systemInstruction: { parts: [{ text: systemInstruction }] }
-                            })
-                        }
-                    );
-                    const aiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || "I am reflecting on your data. Could you try rephrasing?";
-                    setAiMessages(prev => [...prev, { role: 'assistant', text: aiResponse }]);
-                } catch (error) {
-                    setAiMessages(prev => [...prev, { role: 'assistant', text: "My connection to the cloud is weak. Please check your network and try again." }]);
-                } finally {
-                    setIsAiLoading(false);
-                }
+                    const data = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${systemState.geminiKey}`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: userPrompt }] }],
+                            systemInstruction: { parts: [{ text: systemPrompt }] }
+                        })
+                    });
+                    const response = data.candidates?.[0]?.content?.parts?.[0]?.text || "I'm reflecting...";
+                    setAiMessages(p => [...p, { role: 'assistant', text: response }]);
+                } catch (e) {
+                    setAiMessages(p => [...p, { role: 'assistant', text: "Connection error. Please check your API key in Settings." }]);
+                } finally { setIsAiLoading(false); }
             };
 
             const handleAiSend = () => {
-                if (!aiInput.trim() || isAiLoading) return;
-                const newMsg = { role: 'user', text: aiInput };
-                setAiMessages(prev => [...prev, newMsg]);
-                setAiInput("");
+                if (!aiInput.trim()) return;
+                setAiMessages(p => [...p, { role: 'user', text: aiInput }]);
                 callGemini(aiInput);
-                logActivity('ai_chat', aiInput.substring(0, 30));
+                setAiInput("");
             };
 
             // --- ACTIONS ---
-            const toggle = (day, habitId) => {
-                const targetDayKey = getDayKey(day, navDate.getFullYear(), navDate.getMonth());
-                const isRealToday = targetDayKey === todayKey;
+            const toggle = (day, month, year, habitId) => {
                 const habit = habits.find(h => h.id === habitId);
-                const now = new Date();
+                const checkKey = getHabitKey(day, month, year, habitId);
+                const isRealToday = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}` === todayKey;
 
-                if (isRealToday && now.getHours() >= habit.limit) {
-                    if (!confirm(`Window closed. Recording as late.`)) return;
+                if (isRealToday && currentHour >= habit.limit) {
+                    if (!confirm("This window has expired. Proceed as Late Honoring?")) return;
                 }
 
-                const key = `${targetDayKey}-${habitId}`;
                 const newC = { ...completions };
-                let action = '';
-                if (newC[key]) {
-                    delete newC[key];
-                    action = 'unmark_ritual';
-                } else {
-                    newC[key] = { status: 'done', timestamp: adjustedTime.toISOString(), isLate: !isRealToday };
-                    action = 'honor_ritual';
-                }
+                if (newC[checkKey]) delete newC[checkKey];
+                else newC[checkKey] = { timestamp: adjustedTime.toISOString(), isLate: !isRealToday };
                 
                 setCompletions(newC);
-                const updatedLogs = logActivity(action, habit.name);
-                save(habits, newC, systemState, updatedLogs);
+                const logs = logActivity('toggle_ritual', habit.name);
+                save(habits, newC, systemState, logs);
             };
 
             const commitToday = () => {
                 const newState = { ...systemState, lastCommit: todayKey, commitTime: Date.now() };
                 setSystemState(newState);
-                const updatedLogs = logActivity('seal_commitment', todayKey);
-                save(habits, completions, newState, updatedLogs);
+                const logs = logActivity('commit_lock', todayKey);
+                save(habits, completions, newState, logs);
             };
 
             const addHabit = () => {
                 if (!newHabit.name) return;
-                const limitMap = { Morning: 11, Afternoon: 18, Evening: 24 };
-                const habit = { ...newHabit, id: Date.now().toString(), limit: limitMap[newHabit.category] };
-                const updatedHabits = [...habits, habit];
-                setHabits(updatedHabits);
-                const updatedLogs = logActivity('add_ritual', habit.name);
-                save(updatedHabits, completions, systemState, updatedLogs);
+                const limits = { Morning: 11, Afternoon: 18, Evening: 24 };
+                const habit = { ...newHabit, id: Date.now().toString(), limit: limits[newHabit.category] };
+                const updated = [...habits, habit];
+                setHabits(updated);
                 setIsAdding(false);
-                setNewHabit({ name: '', icon: '✨', target: 7, category: 'Morning', priority: 'support' });
+                const logs = logActivity('add_habit', habit.name);
+                save(updated, completions, systemState, logs);
+                setNewHabit({ name: '', icon: '✨', category: 'Morning', priority: 'support' });
             };
 
-            // --- METRICS ---
+            // --- ANALYTICS ---
+            const format12h = (hour) => {
+                const h = hour % 12 || 12;
+                const ampm = hour >= 12 && hour < 24 ? 'PM' : 'AM';
+                return `${h}:00 ${ampm}`;
+            };
+
+            const getRemainingText = (habit) => {
+                if (currentHour >= habit.limit) return "Expired";
+                const minsRemaining = (habit.limit * 60) - (currentHour * 60 + currentMinutes);
+                if (minsRemaining > 60) return `${Math.floor(minsRemaining/60)}h remaining`;
+                return `${minsRemaining}m remaining`;
+            };
+
             const integrityMetrics = useMemo(() => {
-                let honestyPoints = 0;
+                let pts = 0;
                 let logs = [];
-                const sortedKeys = Object.keys(completions).sort((a, b) => new Date(completions[b].timestamp) - new Date(completions[a].timestamp));
-
-                sortedKeys.forEach(k => {
-                    const comp = completions[k];
-                    const [y, m, d, habitId] = k.split('-');
-                    const habit = habits.find(h => h.id === habitId);
-                    if (!habit) return;
-                    if (!comp.isLate) honestyPoints++; else honestyPoints -= 0.5;
-                    logs.push({ type: comp.isLate ? 'minus' : 'plus', points: comp.isLate ? '-0.5' : '+1.0', reason: comp.isLate ? `Late: ${habit.name}` : `Word kept: ${habit.name}`, date: `${d}/${m}`, time: new Date(comp.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) });
+                Object.keys(completions).forEach(k => {
+                    const c = completions[k];
+                    const [y, m, d, hid] = k.split('-');
+                    const h = habits.find(h => h.id === hid);
+                    if (!h) return;
+                    if (!c.isLate) pts++; else pts -= 0.5;
+                    logs.push({ type: c.isLate ? 'minus' : 'plus', points: c.isLate ? '-0.5' : '+1.0', reason: `${c.isLate ? 'Late' : 'Kept'}: ${h.name}`, date: `${d}/${m}`, time: new Date(c.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) });
                 });
-
-                const next = habits.find(h => !completions[`${todayKey}-${h.id}`] && currentHour < h.limit) || habits.find(h => !completions[`${todayKey}-${h.id}`]);
-                return { title: honestyPoints > 50 ? "Integrated" : "Observer", points: honestyPoints, next, logs };
-            }, [habits, completions, todayKey, currentHour]);
+                const next = habits.find(h => !completions[getHabitKey(adjustedTime.getUTCDate(), adjustedTime.getUTCMonth(), adjustedTime.getUTCFullYear(), h.id)]);
+                return { pts, title: pts > 50 ? "Integrated" : pts > 10 ? "Practitioner" : "Observer", next, logs };
+            }, [habits, completions, todayKey, adjustedTime]);
 
             const isCommitted = systemState.lastCommit === todayKey;
             const canStillEdit = isCommitted && (Date.now() - systemState.commitTime < 15 * 60000);
 
             const gridDays = useMemo(() => {
-                const total = new Date(navDate.getFullYear(), navDate.getMonth() + 1, 0).getDate();
+                const total = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
                 if (viewMode === 'month') return Array.from({length: total}, (_, i) => i + 1);
-                const tDate = (navDate.getMonth() === adjustedTime.getUTCMonth()) ? adjustedTime.getUTCDate() : 1;
-                const start = Math.max(1, tDate - 3);
-                const end = Math.min(total, tDate + 3);
-                return Array.from({length: end - start + 1}, (_, i) => start + i);
-            }, [viewMode, navDate, adjustedTime.getUTCDate()]);
+                const d = viewDate.getMonth() === adjustedTime.getUTCMonth() ? adjustedTime.getUTCDate() : 1;
+                return Array.from({length: 7}, (_, i) => Math.max(1, Math.min(total, d - 3 + i)));
+            }, [viewMode, viewDate, adjustedTime]);
 
             return (
-                <div className="pb-10 animate-fade-in px-4 sm:px-6 lg:px-10">
-                    <div className="max-w-7xl mx-auto space-y-8 mt-6 lg:mt-10">
+                <div className="pb-10 animate-fade-in px-4 sm:px-10">
+                    <div className="max-w-7xl mx-auto space-y-8 mt-10">
                         
                         {/* HEADER */}
                         <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
                             <div className="space-y-1">
                                 <div className="flex items-center gap-2">
                                     <div className="h-1.5 w-8 bg-slate-900 rounded-full"></div>
-                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">FocusLab Intelligence</span>
-                                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded bg-slate-100`}>{integrityMetrics.title}</span>
+                                    <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">FocusLab Identity</span>
+                                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded bg-slate-100 text-indigo-600`}>{integrityMetrics.title}</span>
                                 </div>
-                                <h1 className="text-4xl lg:text-5xl font-black tracking-tighter">Honesty & Ritual</h1>
+                                <h1 className="text-4xl lg:text-5xl font-black tracking-tighter">Identity Design</h1>
                             </div>
                             
                             <div className="flex flex-wrap items-center gap-3 bg-white p-2 rounded-full shadow-lg border border-slate-100">
                                 <div className="flex items-center gap-3 px-4 py-2 bg-slate-900 text-white rounded-full">
                                     <div className="w-2 h-2 rounded-full bg-emerald-500 clock-pulse"></div>
-                                    <span className="text-xs font-black tracking-widest">{current12hTime}</span>
+                                    <span className="text-xs font-black">{adjustedTime.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true, timeZone:'UTC'})}</span>
                                     <span className="text-[9px] font-bold text-slate-400 border-l border-slate-700 pl-2 uppercase">GMT+{systemState.gmtOffset}</span>
                                 </div>
-                                <div className="h-6 w-px bg-slate-100"></div>
-                                <button onClick={() => handleMonthChange(-1)} className="p-2 text-slate-400">←</button>
-                                <span className="font-black text-xs uppercase tracking-widest min-w-[80px] text-center">{MONTHS[navDate.getMonth()]}</span>
-                                <button onClick={() => handleMonthChange(1)} className="p-2 text-slate-400">→</button>
+                                <button onClick={() => setViewMode(viewMode === 'week' ? 'month' : 'week')} className="px-4 py-2 text-[10px] font-black uppercase text-indigo-600 hover:bg-slate-50 rounded-full">{viewMode === 'week' ? 'Month View' : 'Focus Week'}</button>
+                                <button onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth()-1)))} className="p-2">←</button>
+                                <span className="font-black text-xs uppercase min-w-[80px] text-center">{MONTHS[viewDate.getMonth()]}</span>
+                                <button onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth()+1)))} className="p-2">→</button>
                             </div>
                         </header>
 
                         {/* DASHBOARD */}
                         <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div className={`p-8 rounded-[3rem] shadow-xl transition-all duration-500 ${isCommitted ? 'bg-white border border-slate-100' : 'integrity-gradient text-white'}`}>
-                                <h3 className={`text-[10px] font-black uppercase tracking-widest mb-4 ${isCommitted ? 'text-slate-400' : 'text-slate-500'}`}>Integrity Pledge</h3>
+                                <h3 className="text-[10px] font-black uppercase tracking-widest mb-4 opacity-60">The Daily Oath</h3>
                                 {!isCommitted ? (
                                     <div className="space-y-4">
-                                        <p className="text-xl font-bold leading-tight">Today, I commit to my rituals.</p>
-                                        <button onClick={commitToday} className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase shadow-xl">Commit Now</button>
+                                        <p className="text-xl font-bold">"Today, I commit to honoring my identity through these rituals."</p>
+                                        <button onClick={commitToday} className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase shadow-xl">Seal Promise</button>
                                     </div>
                                 ) : (
                                     <div className="space-y-2">
-                                        <div className="text-emerald-500 font-black text-sm uppercase flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> Committed</div>
-                                        <p className="text-slate-500 text-sm italic pt-2">Your data is being logged for audit.</p>
+                                        <div className="text-emerald-500 font-black text-sm uppercase flex items-center gap-2">✓ Promise Sealed</div>
+                                        {canStillEdit && <p className="text-[10px] text-amber-500 font-bold animate-pulse">GRACE PERIOD ACTIVE (15M)</p>}
+                                        <p className="text-slate-500 text-sm italic pt-2">Your rituals are locked for {todayKey}.</p>
                                     </div>
                                 )}
                             </div>
 
                             <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-slate-100 group">
-                                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Urgent Move</h3>
+                                <h3 className="text-[10px] font-black uppercase tracking-widest mb-4 text-slate-400">Next Objective</h3>
                                 {integrityMetrics.next ? (
                                     <div className="space-y-5">
-                                        <div className="text-3xl font-black tracking-tight">{integrityMetrics.next.icon} {integrityMetrics.next.name}</div>
+                                        <div className="text-3xl font-black">{integrityMetrics.next.icon} {integrityMetrics.next.name}</div>
                                         <div className="flex gap-2">
                                             <span className="text-[9px] font-black uppercase text-indigo-500 bg-indigo-50 px-2 py-1 rounded-lg">{integrityMetrics.next.category} Cycle</span>
+                                            <span className="text-[9px] font-black uppercase text-orange-600 bg-orange-50 px-2 py-1 rounded-lg">Locks {format12h(integrityMetrics.next.limit)}</span>
                                         </div>
-                                        <button disabled={!isCommitted} onClick={() => toggle(adjustedTime.getUTCDate(), integrityMetrics.next.id)} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase shadow-lg disabled:opacity-10">Honor Ritual</button>
+                                        <div className="flex gap-2">
+                                            <button disabled={!isCommitted} onClick={() => toggle(adjustedTime.getUTCDate(), adjustedTime.getUTCMonth(), adjustedTime.getUTCFullYear(), integrityMetrics.next.id)} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase shadow-lg disabled:opacity-10">Honor Ritual</button>
+                                            <button onClick={() => setIsAdding(true)} className="px-5 bg-slate-50 rounded-2xl border border-slate-100">+</button>
+                                        </div>
                                     </div>
                                 ) : (
-                                    <div className="flex flex-col items-center justify-center py-4 text-center">
-                                        <span className="text-4xl mb-2">🧘</span>
-                                        <div className="font-black text-emerald-500 uppercase text-[10px] tracking-widest">Complete</div>
-                                    </div>
+                                    <div className="flex flex-col items-center justify-center py-4"><span className="text-4xl">🧘</span><div className="font-black text-emerald-500 uppercase text-[10px] mt-2">All Secured</div></div>
                                 )}
                             </div>
 
                             <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-slate-100 flex flex-col justify-between">
                                 <div>
-                                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Balance</h3>
-                                    <div className="text-6xl font-black tracking-tighter text-slate-900">{integrityMetrics.points}</div>
+                                    <h3 className="text-[10px] font-black uppercase tracking-widest mb-4 text-slate-400">Balance</h3>
+                                    <div className="text-6xl font-black tracking-tighter">{integrityMetrics.pts}</div>
                                 </div>
-                                <button onClick={() => setIsLogOpen(true)} className="text-[9px] text-indigo-600 font-bold uppercase tracking-widest mt-4 text-left hover:underline">View Audit Ledger →</button>
+                                <button onClick={() => setIsLogOpen(true)} className="text-[9px] text-indigo-600 font-bold uppercase hover:underline">View Audit Ledger →</button>
                             </div>
                         </section>
 
                         {/* GRID */}
-                        <div className={`bg-white rounded-[3rem] shadow-2xl border border-slate-100 overflow-hidden relative transition-all duration-700 ${(!isCommitted && !canStillEdit) ? 'opacity-20 blur-md grayscale pointer-events-none' : ''}`}>
+                        <div className={`bg-white rounded-[3rem] shadow-2xl border border-slate-100 overflow-hidden relative transition-all duration-700 ${(!isCommitted && !canStillEdit) ? 'opacity-20 blur-md pointer-events-none' : ''}`}>
                             <div className="overflow-x-auto custom-scrollbar">
                                 <table className="w-full border-collapse">
                                     <thead>
                                         <tr className="bg-slate-50/50">
-                                            <th className="sticky-col p-6 text-left border-b border-slate-100 min-w-[200px]"><span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Ritual Set</span></th>
+                                            <th className="sticky-col p-6 text-left border-b border-slate-100 min-w-[220px]">
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-[10px] font-black uppercase text-slate-400">Ritual System</span>
+                                                    <span className="text-[8px] font-bold text-indigo-600 uppercase">Live Deadlines Active</span>
+                                                </div>
+                                            </th>
                                             {gridDays.map(day => (
-                                                <th key={day} className={`p-4 border-b border-slate-100 min-w-[50px] text-center`}>
-                                                    <div className={`text-[8px] font-black uppercase mb-0.5 text-slate-300`}>{day}</div>
-                                                </th>
+                                                <th key={day} className="p-4 border-b border-slate-100 min-w-[60px] text-center text-[10px] font-black text-slate-300 uppercase">{day}</th>
                                             ))}
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-50">
-                                        {habits.map(h => (
-                                            <tr key={h.id} className="group">
-                                                <td className="sticky-col p-6"><div className="font-bold text-xs lg:text-sm">{h.icon} {h.name}</div></td>
-                                                {gridDays.map(day => (
-                                                    <td key={day} className={`p-2 text-center`}>
-                                                        <button onClick={() => toggle(day, h.id)} className={`w-10 h-10 rounded-2xl flex items-center justify-center mx-auto text-lg ${completions[`${getDayKey(day, navDate.getFullYear(), navDate.getMonth())}-${h.id}`] ? 'bg-indigo-600 text-white' : 'bg-slate-50 text-slate-200'}`}>
-                                                            {completions[`${getDayKey(day, navDate.getFullYear(), navDate.getMonth())}-${h.id}`] ? '✓' : '•'}
-                                                        </button>
+                                        {habits.map(h => {
+                                            const timeTxt = getRemainingText(h);
+                                            const isUrgent = timeTxt.includes('m remaining') && !timeTxt.includes('Expired');
+                                            
+                                            return (
+                                                <tr key={h.id} className="group">
+                                                    <td className="sticky-col p-6">
+                                                        <div className="flex flex-col">
+                                                            <div className="font-bold text-sm">{h.icon} {h.name}</div>
+                                                            <div className="flex items-center gap-2 mt-1">
+                                                                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${isUrgent ? 'bg-red-50 text-red-600 animate-pulse' : 'bg-slate-100 text-slate-400'}`}>
+                                                                    {timeTxt}
+                                                                </span>
+                                                                <span className="text-[8px] font-bold text-slate-300 uppercase">at {format12h(h.limit)}</span>
+                                                            </div>
+                                                        </div>
                                                     </td>
-                                                ))}
-                                            </tr>
-                                        ))}
+                                                    {gridDays.map(day => {
+                                                        const key = getHabitKey(day, viewDate.getMonth(), viewDate.getFullYear(), h.id);
+                                                        const isDone = completions[key];
+                                                        const isT = day === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth();
+                                                        const expired = isT && currentHour >= h.limit;
+
+                                                        return (
+                                                            <td key={day} className={`p-2 text-center ${isT ? 'bg-indigo-50/20' : ''}`}>
+                                                                <button 
+                                                                    onClick={() => toggle(day, viewDate.getMonth(), viewDate.getFullYear(), h.id)} 
+                                                                    className={`w-11 h-11 rounded-2xl flex flex-col items-center justify-center mx-auto text-lg transition-all ${
+                                                                        isDone ? 'bg-indigo-600 text-white shadow-lg' : 
+                                                                        expired ? 'bg-slate-100 text-slate-300' : 
+                                                                        'bg-slate-50 text-slate-200 hover:bg-slate-100'
+                                                                    } ${isT && !isDone && isUrgent ? 'border-2 border-red-500 urgent-pulse' : ''}`}
+                                                                >
+                                                                    <span>{isDone ? '✓' : expired ? '✕' : '•'}</span>
+                                                                    {isT && !isDone && !expired && (
+                                                                        <span className="text-[7px] font-black opacity-60 uppercase">{h.limit}h</span>
+                                                                    )}
+                                                                </button>
+                                                            </td>
+                                                        );
+                                                    })}
+                                                </tr>
+                                            );
+                                        })}
                                     </tbody>
                                 </table>
                             </div>
                         </div>
                     </div>
 
-                    {/* AI CHAT MODAL */}
+                    {/* AI MODAL */}
                     {isAiOpen && (
                         <div className="fixed inset-0 z-[110] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-4">
-                            <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl h-[80vh] flex flex-col overflow-hidden relative">
-                                <div className="p-8 border-b flex justify-between items-center bg-indigo-600 text-white">
-                                    <div>
-                                        <h2 className="text-2xl font-black tracking-tighter">Mindful Adviser</h2>
-                                        <p className="text-[10px] font-bold uppercase opacity-80">Powered by Gemini Intelligent Context</p>
-                                    </div>
-                                    <button onClick={() => setIsAiOpen(false)} className="text-white font-black">✕</button>
+                            <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl h-[80vh] flex flex-col overflow-hidden">
+                                <div className="p-8 bg-indigo-600 text-white flex justify-between">
+                                    <h2 className="text-2xl font-black">Mindful Adviser</h2>
+                                    <button onClick={() => setIsAiOpen(false)}>✕</button>
                                 </div>
                                 <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
-                                    {aiMessages.map((msg, i) => (
-                                        <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                            <div className={`max-w-[85%] p-4 rounded-3xl text-sm leading-relaxed ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700'}`}>
-                                                {msg.text}
-                                            </div>
+                                    {aiMessages.map((m, i) => (
+                                        <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                            <div className={`max-w-[85%] p-4 rounded-3xl text-sm ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-100'}`}>{m.text}</div>
                                         </div>
                                     ))}
-                                    {isAiLoading && <div className="text-[10px] font-black text-indigo-400 animate-pulse uppercase tracking-widest">Adviser is reflecting...</div>}
+                                    {isAiLoading && <div className="text-[10px] font-black text-indigo-400 animate-pulse uppercase">Reflecting...</div>}
                                 </div>
                                 <div className="p-6 border-t flex gap-3">
-                                    <input value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAiSend()} placeholder="Ask about your performance..." className="flex-1 bg-slate-50 p-4 rounded-2xl text-sm outline-none border border-slate-100 focus:border-indigo-300" />
+                                    <input value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAiSend()} className="flex-1 bg-slate-50 p-4 rounded-2xl text-sm outline-none" placeholder="Ask about your performance..." />
                                     <button onClick={handleAiSend} className="bg-indigo-600 text-white px-6 rounded-2xl font-black">→</button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* MODAL: AUDIT LOGS */}
+                    {/* ADD RITUAL MODAL */}
+                    {isAdding && (
+                        <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-6 animate-fade-in">
+                            <div className="bg-white w-full max-w-md rounded-t-[3.5rem] sm:rounded-[4rem] p-10 shadow-2xl border border-white space-y-8">
+                                <h2 className="text-2xl font-black">Design New Ritual</h2>
+                                <div className="space-y-4">
+                                    <div className="flex gap-3">
+                                        <input type="text" value={newHabit.icon} onChange={e => setNewHabit({...newHabit, icon: e.target.value})} className="w-16 p-4 bg-slate-50 border rounded-2xl text-2xl text-center" placeholder="✨" />
+                                        <input type="text" value={newHabit.name} onChange={e => setNewHabit({...newHabit, name: e.target.value})} className="flex-1 p-4 bg-slate-50 border rounded-2xl font-bold" placeholder="Ritual Name" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-slate-400">Weighting</label>
+                                        <div className="flex gap-2">
+                                            {['core', 'support'].map(p => (
+                                                <button key={p} onClick={() => setNewHabit({...newHabit, priority: p})} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${newHabit.priority === p ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+                                                    {p === 'core' ? '🔥 Core' : '⚪ Support'}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-slate-400">Cycle (Time-Lock)</label>
+                                        <div className="flex gap-2">
+                                            {['Morning', 'Afternoon', 'Evening'].map(c => (
+                                                <button key={c} onClick={() => setNewHabit({...newHabit, category: c})} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${newHabit.category === c ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{c}</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex gap-4">
+                                    <button onClick={() => setIsAdding(false)} className="flex-1 py-4 font-black text-slate-400">Discard</button>
+                                    <button onClick={addHabit} className="flex-[2] bg-indigo-600 text-white py-4 rounded-3xl font-black shadow-2xl">Establish</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* SETTINGS MODAL */}
+                    {isInfoOpen && (
+                        <div className="fixed inset-0 z-[110] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-6">
+                            <div className="bg-white w-full max-w-xl rounded-[3rem] p-10 shadow-2xl relative animate-fade-in space-y-6">
+                                <h2 className="text-3xl font-black">Configuration</h2>
+                                
+                                <div className="space-y-6">
+                                    <div className="p-6 bg-slate-50 rounded-[2rem]">
+                                        <h4 className="text-[10px] font-black uppercase text-indigo-600 mb-4 tracking-widest">Gemini AI Integration</h4>
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-bold text-slate-500">API Key:</label>
+                                            <input 
+                                                type="password"
+                                                value={systemState.geminiKey} 
+                                                onChange={e => {
+                                                    const ns = {...systemState, geminiKey: e.target.value};
+                                                    setSystemState(ns); save(habits, completions, ns, activityLogs);
+                                                }}
+                                                placeholder="Paste your Gemini key here..."
+                                                className="w-full p-3 bg-white border border-slate-200 rounded-xl font-mono text-xs outline-none focus:border-indigo-400"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="p-6 bg-slate-50 rounded-[2rem]">
+                                        <h4 className="text-[10px] font-black uppercase text-indigo-600 mb-4 tracking-widest">GMT Offset Calibration</h4>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-sm font-medium">Internal System Timezone:</span>
+                                            <select value={systemState.gmtOffset} onChange={e => {
+                                                const ns = {...systemState, gmtOffset: parseInt(e.target.value)};
+                                                setSystemState(ns); save(habits, completions, ns, activityLogs);
+                                            }} className="p-2 rounded-xl font-bold bg-white border border-slate-200">
+                                                {Array.from({length:27}, (_,i)=>i-12).map(o => <option key={o} value={o}>GMT{o>=0?'+':''}{o}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button onClick={() => setIsInfoOpen(false)} className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black text-xs uppercase">Save & Close</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* AUDIT LOG MODAL */}
                     {isLogOpen && (
-                        <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-6">
+                        <div className="fixed inset-0 z-[110] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-6">
                             <div className="bg-white w-full max-w-xl rounded-[3rem] p-10 shadow-2xl relative animate-fade-in flex flex-col max-h-[85vh]">
-                                <button onClick={() => setIsLogOpen(false)} className="absolute top-8 right-8 text-slate-400 font-black">✕</button>
-                                <h2 className="text-3xl font-black mb-8 border-b pb-4">Audit Ledger</h2>
+                                <h2 className="text-3xl font-black mb-8 border-b pb-4 text-center">Audit Ledger</h2>
                                 <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-2">
                                     {integrityMetrics.logs.map((log, i) => (
                                         <div key={i} className="flex items-start justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
@@ -448,29 +542,6 @@
                         </div>
                     )}
 
-                    {/* MODAL: ADD RITUAL */}
-                    {isAdding && (
-                        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-6 animate-fade-in">
-                            <div className="bg-white w-full max-w-md rounded-t-[3.5rem] sm:rounded-[4rem] p-10 shadow-2xl border border-white">
-                                <h2 className="text-2xl font-black mb-8 tracking-tighter">Design Ritual</h2>
-                                <div className="space-y-8">
-                                    <div className="space-y-3">
-                                        <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Identity</label>
-                                        <div className="flex gap-3">
-                                            <input type="text" value={newHabit.icon} onChange={e => setNewHabit({...newHabit, icon: e.target.value})} className="w-16 p-4 bg-slate-50 border border-slate-100 rounded-2xl text-2xl text-center" placeholder="✨" />
-                                            <input type="text" value={newHabit.name} onChange={e => setNewHabit({...newHabit, name: e.target.value})} className="flex-1 p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold" placeholder="Ritual Name" />
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-4 pt-4">
-                                        <button onClick={() => setIsAdding(false)} className="flex-1 py-5 font-black text-slate-400">Discard</button>
-                                        <button onClick={addHabit} className="flex-[2] bg-indigo-600 text-white py-5 rounded-3xl font-black shadow-2xl active:scale-95 transition-all">Establish</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* ACTION BUTTONS */}
                     <div className="fixed bottom-8 right-8 flex flex-col gap-4">
                         <button onClick={() => setIsAiOpen(true)} className="w-16 h-16 bg-indigo-600 text-white shadow-2xl rounded-full flex items-center justify-center text-xl hover:scale-110 active:scale-95 transition-all">🧠</button>
                         <button onClick={() => setIsLogOpen(true)} className="w-16 h-16 bg-white border border-slate-100 shadow-2xl rounded-full flex items-center justify-center text-xl hover:scale-110 active:scale-95 transition-all">📋</button>
