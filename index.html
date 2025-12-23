@@ -85,6 +85,15 @@
     <div id="root"></div>
 
     <script type="text/babel">
+        // --- ICONS ---
+        const Plus = ({ size = 24 }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        );
+
+        const Cloud = ({ size = 24 }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></svg>
+        );
+
         // --- CONSTANTS ---
         const DEFAULT_HABITS = [
             { id: '1', name: 'Deep Work', icon: '💻', category: 'Morning', limit: 11, prompt: 'What was your primary focus?' },
@@ -94,29 +103,8 @@
         ];
 
         const DEFAULT_PERSONA = "You are the 'Mindful Architect,' a grounded mentor for FocusLab. Integrity is math: $I = \\frac{\\sum Actions}{\\sum Promises}$. Analyze behavioral logs, dashboard stickies, reminders, and habit-specific answers to find why I fail. Use Markdown and LaTeX.";
-        const STORAGE_KEY = 'focuslab_v4.7_reminders';
+        const STORAGE_KEY = 'focuslab_v4.9_stable_reminders';
         const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-
-        const AiMessage = ({ text, role }) => {
-            const containerRef = React.useRef(null);
-            React.useLayoutEffect(() => {
-                if (containerRef.current) {
-                    renderMathInElement(containerRef.current, {
-                        delimiters: [
-                            {left: '$$', right: '$$', display: true},
-                            {left: '$', right: '$', display: false}
-                        ],
-                        throwOnError: false
-                    });
-                }
-            }, [text]);
-            const htmlContent = React.useMemo(() => text ? marked.parse(text) : "", [text]);
-            return (
-                <div className={`flex ${role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in mb-4`}>
-                    <div ref={containerRef} className={`max-w-[90%] p-4 rounded-3xl text-sm leading-relaxed markdown-body ${role === 'user' ? 'bg-indigo-600 text-white shadow-xl' : 'bg-white border border-slate-100 text-slate-800 shadow-sm'}`} dangerouslySetInnerHTML={{ __html: htmlContent }} />
-                </div>
-            );
-        };
 
         const App = () => {
             const { useState, useEffect, useMemo, useRef } = React;
@@ -127,7 +115,7 @@
             const [completions, setCompletions] = useState({});
             const [activityLogs, setActivityLogs] = useState([]);
             const [journalEntries, setJournalEntries] = useState([]); 
-            const [reminders, setReminders] = useState([]); // New Reminders State
+            const [reminders, setReminders] = useState([]); 
             const [conversations, setConversations] = useState([]);
             const [quotes, setQuotes] = useState(["Your word is your bond.", "Behavior is the only truth."]);
             const [activeChatId, setActiveChatId] = useState(null);
@@ -143,7 +131,7 @@
             const [isJournalOpen, setIsJournalOpen] = useState(false);
             const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
             
-            // Note Capture Modal State
+            // Dual-Capture Note State
             const [noteType, setNoteType] = useState('reflection'); // 'reflection' or 'reminder'
             
             // Prompt Feature State
@@ -162,6 +150,7 @@
             const [newQuoteInput, setNewQuoteInput] = useState("");
             const [time, setTime] = useState(new Date());
 
+            // --- SERVICES ---
             const services = useMemo(() => {
                 if (!window.FirebaseSDK) return null;
                 const { initializeApp, getAuth, getFirestore } = window.FirebaseSDK;
@@ -173,7 +162,7 @@
                 } catch (e) { return null; }
             }, []);
 
-            // --- ENGINE ---
+            // --- COMPUTED DATA (CRITICAL SCOPING) ---
             const adjustedTime = useMemo(() => {
                 const utc = time.getTime() + (time.getTimezoneOffset() * 60000);
                 return new Date(utc + (3600000 * systemState.gmtOffset));
@@ -181,9 +170,32 @@
 
             const currentHour = adjustedTime.getUTCHours();
             const todayKey = `${adjustedTime.getUTCFullYear()}-${String(adjustedTime.getUTCMonth() + 1).padStart(2, '0')}-${String(adjustedTime.getUTCDate()).padStart(2, '0')}`;
+            
+            const integrityMetrics = useMemo(() => {
+                let pts = 0; let logs = [];
+                Object.keys(completions).forEach(k => {
+                    const c = completions[k]; const parts = k.split('-'); if (parts.length < 4) return;
+                    const h = habits.find(h => h.id === parts[3]); if (!h) return;
+                    if (!c.isLate) pts++; else pts -= 0.5;
+                    logs.push({ type: c.isLate ? 'minus' : 'plus', points: c.isLate ? '-0.5' : '+1.0', reason: `${c.isLate ? 'Late' : 'Kept'}: ${h.name}`, date: `${parts[2]}/${parts[1]}`, time: new Date(c.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), answer: c.answer });
+                });
+                const tiers = [{t: "The Observer", m: 0}, {t: "The Practitioner", m: 10}, {t: "The Integrated", m: 50}, {t: "The Architect", m: 100}];
+                const currentTier = tiers.filter(t => pts >= t.m).pop() || tiers[0];
+                const nextTier = tiers[tiers.indexOf(currentTier) + 1] || currentTier;
+                const progress = nextTier === currentTier ? 100 : ((pts - currentTier.m) / (nextTier.m - currentTier.m)) * 100;
+                return { pts, title: currentTier.t, nextTier: nextTier.t, progress, logs };
+            }, [habits, completions]);
+
             const isCommitted = useMemo(() => systemState.lastCommit === todayKey, [systemState.lastCommit, todayKey]);
             const activeChat = useMemo(() => conversations.find(c => c.id === activeChatId), [conversations, activeChatId]);
 
+            const formatLimit = (limit) => {
+                if (limit === 24) return "11:59 PM";
+                const hour = limit % 12 || 12;
+                return `${hour}:00 ${limit >= 12 ? 'PM' : 'AM'}`;
+            };
+
+            // --- PERSISTENCE ---
             const save = async (h, c, s, logs, journal, chats, q, r) => {
                 const payload = { habits: h, completions: c, systemState: s, activityLogs: logs, journalEntries: journal, conversations: chats, quotes: q, reminders: r };
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -202,64 +214,39 @@
                 return updated;
             };
 
-            // --- AI LOGIC ---
-            const callGemini = async (prompt, currentMessages) => {
-                const apiKey = systemState.geminiKey;
-                if (!apiKey) return;
-                setIsAiLoading(true);
-                const recentJournals = journalEntries.slice(0, 5).map(j => j.text).join('\n');
-                const activeReminders = reminders.map(r => r.text).join('\n');
-                
-                const ritualResponses = Object.keys(completions)
-                    .filter(k => completions[k].answer)
-                    .slice(-10)
-                    .map(k => `[Habit Response]: ${completions[k].answer}`)
-                    .join('\n');
+            // --- EXPORT DATA ---
+            const handleExportData = () => {
+                const timestamp = new Date().toLocaleString();
+                const headers = `FOCUSLAB IDENTITY SYSTEM EXPORT - ${timestamp}\n==================================================\n\n`;
+                const stats = `IDENTITY PROFILE:\n- Current Status: ${integrityMetrics.title}\n- Integrity Points: ${integrityMetrics.pts}\n- Active Timezone: GMT+${systemState.gmtOffset}\n\n`;
+                const ritualDefinitions = `RITUAL ARCHITECTURE:\n${habits.map(h => `- ${h.icon} ${h.name} (Deadline: ${formatLimit(h.limit)})${h.prompt ? ` [Follow-up: ${h.prompt}]` : ''}`).join('\n')}\n\n`;
+                const reflectionNotes = `PERSONAL JOURNAL ENTRIES:\n${journalEntries.map(e => `[${new Date(e.timestamp).toLocaleString()}] ${e.text}`).join('\n\n')}\n\n`;
+                const activeReminders = `SYSTEM REMINDERS:\n${reminders.map(r => `[${new Date(r.timestamp).toLocaleDateString()}] ${r.text}`).join('\n')}\n\n`;
+                const behavioralLogs = `COMPLETION HISTORY:\n${Object.keys(completions).map(key => {
+                    const dateParts = key.split('-');
+                    const habit = habits.find(h => h.id === dateParts[3]);
+                    const entry = completions[key];
+                    return `Date: ${dateParts[0]}-${dateParts[1]}-${dateParts[2]} | Habit: ${habit ? habit.name : 'Unknown'} | Status: ${entry.isLate ? 'LATE' : 'ON-TIME'}${entry.answer ? ` | Insight: "${entry.answer}"` : ''}`;
+                }).join('\n')}\n\n`;
 
-                const systemPrompt = `${systemState.geminiPersona}\n\nUSER DATA:\nIntegrity: ${integrityMetrics.pts}pts\nJournal Notes:\n${recentJournals}\nActive Reminders:\n${activeReminders || "None"}\nBehavioral Responses:\n${ritualResponses}`;
-                
-                try {
-                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            contents: currentMessages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.text }] })),
-                            systemInstruction: { parts: [{ text: systemPrompt }] },
-                            safetySettings: [
-                                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-                                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-                                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-                                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-                            ]
-                        })
-                    });
-                    const data = await res.json();
-                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "Architect silent.";
-                    const updated = conversations.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, { role: 'assistant', text }], lastUpdated: new Date().toISOString() } : c);
-                    setConversations(updated);
-                    save(habits, completions, systemState, activityLogs, journalEntries, updated, quotes, reminders);
-                } catch (e) {} finally { setIsAiLoading(false); }
+                const fullContent = headers + stats + ritualDefinitions + reflectionNotes + activeReminders + behavioralLogs;
+                const blob = new Blob([fullContent], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `focuslab_identity_ledger_${todayKey}.txt`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+                logActivity('export', 'Identity Ledger Downloaded');
             };
 
-            const handleAiSend = () => {
-                if (!aiInput.trim() || isAiLoading || !activeChatId) return;
-                const prompt = aiInput; setAiInput("");
-                const updated = conversations.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, { role: 'user', text: prompt }], lastUpdated: new Date().toISOString() } : c);
-                setConversations(updated);
-                callGemini(prompt, updated.find(c => c.id === activeChatId).messages);
-            };
-
-            const createNewChat = () => {
-                const newChat = { id: Date.now().toString(), title: `Chat ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`, messages: [{ role: 'assistant', text: "Adviser present. I've synced your latest notes and reminders. How shall we begin?" }], lastUpdated: new Date().toISOString() };
-                const updated = [newChat, ...conversations]; setConversations(updated); setActiveChatId(newChat.id);
-                save(habits, completions, systemState, activityLogs, journalEntries, updated, quotes, reminders);
-            };
-
+            // --- COMPLETION LOGIC ---
             const toggleHabit = (day, habit) => {
                 const key = `${viewDate.getFullYear()}-${String(viewDate.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}-${habit.id}`;
                 const isT = day === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth();
                 const expired = isT && currentHour >= (habit.limit || 24);
-
                 const newC = {...completions};
                 if (newC[key]) {
                     delete newC[key];
@@ -268,10 +255,7 @@
                 } else {
                     if (expired && !confirm("Marking this as LATE (-0.5 pts)?")) return;
                     if (habit.prompt) {
-                        setActivePromptHabit(habit);
-                        setPendingCompletionKey(key);
-                        setIsPromptModalOpen(true);
-                        setPromptInput("");
+                        setActivePromptHabit(habit); setPendingCompletionKey(key); setIsPromptModalOpen(true); setPromptInput("");
                     } else {
                         newC[key] = { timestamp: adjustedTime.toISOString(), isLate: !isT || expired };
                         setCompletions(newC);
@@ -281,9 +265,7 @@
             };
 
             const finalizePromptCompletion = () => {
-                const habit = activePromptHabit;
-                const key = pendingCompletionKey;
-                if (!habit || !key) return;
+                const habit = activePromptHabit; const key = pendingCompletionKey; if (!habit || !key) return;
                 const dayParts = key.split('-');
                 const isT = parseInt(dayParts[2]) === adjustedTime.getUTCDate() && (parseInt(dayParts[1]) - 1) === adjustedTime.getUTCMonth();
                 const expired = isT && currentHour >= (habit.limit || 24);
@@ -293,62 +275,16 @@
                 setIsPromptModalOpen(false); setActivePromptHabit(null); setPendingCompletionKey(null);
             };
 
-            const handleRitualSubmit = () => {
-                if (!newHabit.name) return;
-                const limits = { Morning: 11, Afternoon: 18, Evening: 24 };
-                let updated;
-                if (editingHabitId) {
-                    updated = habits.map(h => h.id === editingHabitId ? { ...h, ...newHabit, limit: limits[newHabit.category] || 24 } : h);
-                    logActivity('edit_ritual', newHabit.name);
-                } else {
-                    updated = [...habits, { ...newHabit, id: Date.now().toString(), limit: limits[newHabit.category] || 24 }];
-                    logActivity('add_ritual', newHabit.name);
-                }
-                setHabits(updated);
-                save(updated, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders);
-                setNewHabit({ name: '', icon: '✨', category: 'Morning', prompt: '' }); setEditingHabitId(null); setIsAdding(false);
-            };
-
-            const integrityMetrics = useMemo(() => {
-                let pts = 0; let logs = [];
-                Object.keys(completions).forEach(k => {
-                    const c = completions[k]; const parts = k.split('-'); if (parts.length < 4) return;
-                    const h = habits.find(h => h.id === parts[3]); if (!h) return;
-                    if (!c.isLate) pts++; else pts -= 0.5;
-                    logs.push({ type: c.isLate ? 'minus' : 'plus', points: c.isLate ? '-0.5' : '+1.0', reason: `${c.isLate ? 'Late' : 'Kept'}: ${h.name}`, date: `${parts[2]}/${parts[1]}`, time: new Date(c.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), answer: c.answer });
-                });
-                const tiers = [{t: "The Observer", m: 0}, {t: "The Practitioner", m: 10}, {t: "The Integrated", m: 50}, {t: "The Architect", m: 100}];
-                const currentTier = tiers.filter(t => pts >= t.m).pop();
-                const nextTier = tiers[tiers.indexOf(currentTier) + 1] || currentTier;
-                const progress = nextTier === currentTier ? 100 : ((pts - currentTier.m) / (nextTier.m - currentTier.m)) * 100;
-                return { pts, title: currentTier.t, nextTier: nextTier.t, progress, logs };
-            }, [habits, completions]);
-
-            const formatLimit = (limit) => {
-                if (limit === 24) return "11:59 PM";
-                const hour = limit % 12 || 12;
-                return `${hour}:00 ${limit >= 12 ? 'PM' : 'AM'}`;
-            };
-
+            // --- INITIALIZATION ---
             useEffect(() => {
                 const timer = setInterval(() => setTime(new Date()), 1000);
-                const local = localStorage.getItem(STORAGE_KEY);
-                if (local) {
-                    const p = JSON.parse(local);
-                    setHabits(p.habits || DEFAULT_HABITS); setCompletions(p.completions || {});
-                    setActivityLogs(p.activityLogs || []); setJournalEntries(p.journalEntries || []);
-                    setConversations(p.conversations || []); if (p.systemState) setSystemState(p.systemState);
-                    if (p.conversations?.length) setActiveChatId(p.conversations[0].id);
-                    if (p.quotes) setQuotes(p.quotes);
-                    if (p.reminders) setReminders(p.reminders);
-                }
                 return () => clearInterval(timer);
             }, []);
 
             return (
                 <div className="pb-24 px-4 sm:px-10 max-w-7xl mx-auto space-y-10 mt-6 md:mt-10 animate-fade-in">
                     
-                    {/* PROGRESSIVE HEADER */}
+                    {/* HEADER */}
                     <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 bg-white p-6 md:p-10 rounded-[3rem] shadow-sm border border-slate-100">
                         <div className="space-y-4 w-full md:w-auto">
                             <div className="space-y-1">
@@ -360,8 +296,7 @@
                             </div>
                             <div className="w-full md:w-64">
                                 <div className="flex justify-between text-[8px] font-black uppercase text-slate-400 mb-1 tracking-widest">
-                                    <span>Progress to {integrityMetrics.nextTier}</span>
-                                    <span>{Math.round(integrityMetrics.progress)}%</span>
+                                    <span>Progress: {Math.round(integrityMetrics.progress)}%</span>
                                 </div>
                                 <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
                                     <div className="h-full bg-indigo-600 transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(79,70,229,0.4)]" style={{ width: `${integrityMetrics.progress}%` }} />
@@ -376,27 +311,14 @@
                         </div>
                     </header>
 
-                    {/* DASHBOARD STATS */}
+                    {/* STATS SECTION */}
                     <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className={`p-8 rounded-[3.5rem] shadow-xl transition-all duration-500 flex flex-col justify-between min-h-[220px] ${isCommitted ? 'bg-white border' : 'integrity-gradient text-white shadow-indigo-200/50'}`}>
-                            <div>
-                                <h3 className="text-[10px] font-black uppercase opacity-60 mb-2 tracking-widest">Daily Oath</h3>
-                                {!isCommitted ? <p className="text-lg font-bold leading-tight">Commit your word to unlock the grid.</p> : <p className="text-lg font-bold italic text-slate-800">Identity locked. Rituals active.</p>}
-                            </div>
-                            {!isCommitted && <button onClick={() => {
-                                const ns = {...systemState, lastCommit: todayKey, commitTime: Date.now()};
-                                setSystemState(ns); save(habits, completions, ns, logActivity('commit', todayKey), journalEntries, conversations, quotes, reminders);
-                            }} className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black shadow-xl hover:scale-105 active:scale-95 transition-all">Seal Today</button>}
+                            <div><h3 className="text-[10px] font-black uppercase opacity-60 mb-2 tracking-widest">Daily Oath</h3>{!isCommitted ? <p className="text-lg font-bold leading-tight">Commit your word to unlock the grid.</p> : <p className="text-lg font-bold italic text-slate-800">Identity locked. Rituals active.</p>}</div>
+                            {!isCommitted && <button onClick={() => { const ns = {...systemState, lastCommit: todayKey, commitTime: Date.now()}; setSystemState(ns); save(habits, completions, ns, logActivity('commit', todayKey), journalEntries, conversations, quotes, reminders); }} className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black shadow-xl hover:scale-105 transition-all">Seal Today</button>}
                         </div>
-                        <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border flex flex-col justify-center items-center group text-center">
-                            <div className="text-7xl font-black tracking-tighter group-hover:text-indigo-600 transition-colors">{integrityMetrics.pts}</div>
-                            <div className="text-[10px] font-black uppercase text-slate-400 mt-2 tracking-[0.2em]">Honesty Quotient</div>
-                        </div>
-                        <div className="bg-indigo-600 p-8 rounded-[3.5rem] shadow-xl text-white flex flex-col justify-between relative overflow-hidden">
-                            <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl" />
-                            <p className="text-sm font-medium opacity-90 italic z-10 text-white">"Discipline is the highest form of self-love."</p>
-                            <button onClick={() => { setNoteType('reflection'); setIsJournalOpen(true); }} className="w-full py-4 bg-white text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-50 transition-all z-10">Capture Reflection 📝</button>
-                        </div>
+                        <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border flex flex-col justify-center items-center group text-center"><div className="text-7xl font-black tracking-tighter group-hover:text-indigo-600 transition-colors">{integrityMetrics.pts}</div><div className="text-[10px] font-black uppercase text-slate-400 mt-2 tracking-[0.2em]">Honesty Quotient</div></div>
+                        <div className="bg-indigo-600 p-8 rounded-[3.5rem] shadow-xl text-white flex flex-col justify-between relative overflow-hidden"><div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl" /><p className="text-sm font-medium opacity-90 italic z-10 text-white">"Identity is establishing a history of kept promises."</p><button onClick={() => { setNoteType('reflection'); setIsJournalOpen(true); }} className="w-full py-4 bg-white text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-50 transition-all z-10">Pin Note 📝</button></div>
                     </section>
 
                     {/* RITUAL GRID */}
@@ -406,20 +328,9 @@
                                 <thead className="bg-slate-50/50">
                                     <tr>
                                         <th className="sticky-col p-8 text-left border-b min-w-[280px]">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex flex-col gap-1">
-                                                    <span className="text-[11px] font-black uppercase text-slate-400 tracking-[0.2em]">Ritual Stack</span>
-                                                    <span className="text-[9px] font-bold text-indigo-500 uppercase tracking-widest">Time-Lock Active</span>
-                                                </div>
-                                                <button onClick={() => { setEditingHabitId(null); setNewHabit({ name: '', icon: '✨', category: 'Morning', prompt: '' }); setIsAdding(true); }} className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-xl shadow-lg active:scale-90 transition-all">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                                                </button>
-                                            </div>
+                                            <div className="flex items-center justify-between"><div className="flex flex-col gap-1"><span className="text-[11px] font-black uppercase text-slate-400 tracking-[0.2em]">Ritual Stack</span><span className="text-[9px] font-bold text-indigo-500 uppercase tracking-widest">Time-Lock Active</span></div><button onClick={() => { setEditingHabitId(null); setNewHabit({ name: '', icon: '✨', category: 'Morning', prompt: '' }); setIsAdding(true); }} className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-xl shadow-lg active:scale-90 transition-all"><Plus size={16} /></button></div>
                                         </th>
-                                        {Array.from({length:31}, (_,i)=>i+1).map(d => {
-                                            const isT = d === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth();
-                                            return <th key={d} className={`p-4 border-b text-[10px] font-black ${isT ? 'text-indigo-600 bg-indigo-50/50' : 'text-slate-300'}`}>{isT ? 'TODAY' : d}</th>
-                                        })}
+                                        {Array.from({length:31}, (_,i)=>i+1).map(d => { const isT = d === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth(); return <th key={d} className={`p-4 border-b text-[10px] font-black ${isT ? 'text-indigo-600 bg-indigo-50/50' : 'text-slate-300'}`}>{isT ? 'TODAY' : d}</th> })}
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-50">
@@ -428,34 +339,12 @@
                                         return (
                                             <tr key={h.id} className="group hover:bg-slate-50/10 transition-colors">
                                                 <td className="sticky-col p-8 font-bold text-base text-slate-800">
-                                                    <div className="flex items-center justify-between">
-                                                        <div className="flex flex-col gap-1">
-                                                            <div className="flex items-center gap-2"><span>{h.icon}</span><span className="truncate max-w-[120px]">{h.name}</span></div>
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Locks {formatLimit(h.limit)}</span>
-                                                                {isUrgent && <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-ping" />}
-                                                            </div>
-                                                        </div>
-                                                        <button onClick={() => { setNewHabit({ name: h.name, icon: h.icon, category: h.category, prompt: h.prompt || '' }); setEditingHabitId(h.id); setIsAdding(true); }} className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-indigo-600 transition-all">
-                                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                                                        </button>
-                                                    </div>
+                                                    <div className="flex items-center justify-between"><div className="flex flex-col gap-1"><div className="flex items-center gap-2"><span>{h.icon}</span><span className="truncate max-w-[120px]">{h.name}</span></div><div className="flex items-center gap-2"><span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Locks {formatLimit(h.limit)}</span>{isUrgent && <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-ping" />}</div></div><button onClick={() => { setNewHabit({ name: h.name, icon: h.icon, category: h.category, prompt: h.prompt || '' }); setEditingHabitId(h.id); setIsAdding(true); }} className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-indigo-600 transition-all"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button></div>
                                                 </td>
                                                 {Array.from({length:31}, (_,i)=>i+1).map(day => {
                                                     const key = `${viewDate.getFullYear()}-${String(viewDate.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}-${h.id}`;
-                                                    const isDone = completions[key];
-                                                    const isT = day === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth();
-                                                    const expired = isT && currentHour >= (h.limit || 24);
-                                                    return (
-                                                        <td key={day} className={`p-2 text-center transition-all ${isT ? 'bg-indigo-50/10' : ''}`}>
-                                                            <button 
-                                                                onClick={() => toggleHabit(day, h)} 
-                                                                className={`check-anim w-12 h-12 rounded-2xl flex items-center justify-center mx-auto transition-all ${isDone ? 'bg-indigo-600 text-white shadow-lg' : expired ? 'bg-slate-100 text-slate-300' : 'bg-slate-50 text-slate-200 hover:bg-slate-100'} ${isT && !isDone && isUrgent ? 'border-2 border-red-400 urgent-pulse' : ''}`}
-                                                            >
-                                                                {isDone ? '✓' : expired ? '✕' : '•'}
-                                                            </button>
-                                                        </td>
-                                                    );
+                                                    const isDone = completions[key]; const isT = day === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth(); const expired = isT && currentHour >= (h.limit || 24);
+                                                    return <td key={day} className={`p-2 text-center transition-all ${isT ? 'bg-indigo-50/10' : ''}`}><button onClick={() => toggleHabit(day, h)} className={`check-anim w-12 h-12 rounded-2xl flex items-center justify-center mx-auto transition-all ${isDone ? 'bg-indigo-600 text-white shadow-lg' : expired ? 'bg-slate-100 text-slate-300' : 'bg-slate-50 text-slate-200 hover:bg-slate-100'} ${isT && !isDone && isUrgent ? 'border-2 border-red-400 urgent-pulse' : ''}`}>{isDone ? '✓' : expired ? '✕' : '•'}</button></td>
                                                 })}
                                             </tr>
                                         );
@@ -465,53 +354,24 @@
                         </div>
                     </div>
 
-                    {/* PINBOARD SECTION: STICKIES & REMINDERS */}
-                    <div className="pt-10 space-y-8">
-                        <div className="flex items-center justify-center gap-4">
-                            <div className="flex flex-col items-center gap-1 text-center">
+                    {/* DASHBOARD PINBOARD */}
+                    <div className="pt-10 space-y-8 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                            <div className="flex items-center gap-4">
                                 <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Pinboard of Resolve</h2>
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Psychological anchors & identity reminders</p>
+                                <button onClick={() => { setNoteType('reminder'); setIsJournalOpen(true); }} className="w-8 h-8 rounded-full border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200 flex items-center justify-center transition-all bg-white shadow-sm" title="Add Reminder"><Plus size={14} /></button>
                             </div>
-                            <button 
-                                onClick={() => { setNoteType('reminder'); setIsJournalOpen(true); }}
-                                className="w-8 h-8 rounded-full border border-slate-200 text-slate-400 hover:text-indigo-600 flex items-center justify-center transition-all bg-white shadow-sm"
-                                title="Pin Reminder"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-                            </button>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Identity anchors & system reminders</p>
                         </div>
-                        
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-10 px-4 pb-20">
-                            {/* Quotes (Yellow) */}
                             {quotes.map((q, i) => (
-                                <div key={`quote-${i}`} className="dashboard-sticky p-10 min-h-[220px] relative transform rotate-[-2deg] flex items-center justify-center text-center group">
-                                    <div className="sticky-pin" />
-                                    <button onClick={() => { const nq = quotes.filter((_, idx) => idx !== i); setQuotes(nq); save(habits, completions, systemState, activityLogs, journalEntries, conversations, nq, reminders); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-500">✕</button>
-                                    <p className="text-2xl font-bold text-slate-700 italic leading-tight">"{q}"</p>
-                                </div>
+                                <div key={`quote-${i}`} className="dashboard-sticky p-10 min-h-[220px] relative transform rotate-[-2deg] flex items-center justify-center text-center group"><div className="sticky-pin" /><button onClick={() => { const nq = quotes.filter((_, idx) => idx !== i); setQuotes(nq); save(habits, completions, systemState, activityLogs, journalEntries, conversations, nq, reminders); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all">✕</button><p className="text-2xl font-bold text-slate-700 italic leading-tight">"{q}"</p></div>
                             ))}
-
-                            {/* Reflections (Yellow) */}
                             {journalEntries.map((e, i) => (
-                                <div key={`note-${i}`} className="dashboard-sticky p-10 min-h-[220px] relative transform rotate-[1.5deg] group flex flex-col justify-between">
-                                    <div className="sticky-pin" />
-                                    <button onClick={() => { if(confirm("Discard reflection?")) { const u = journalEntries.filter(je => je.timestamp !== e.timestamp); setJournalEntries(u); save(habits, completions, systemState, activityLogs, u, conversations, quotes, reminders); } }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-500">✕</button>
-                                    <div className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-4 text-center">{new Date(e.timestamp).toLocaleDateString()}</div>
-                                    <p className="text-xl font-bold text-slate-800 leading-tight">"{e.text}"</p>
-                                </div>
+                                <div key={`note-${i}`} className="dashboard-sticky p-10 min-h-[220px] relative transform rotate-[1.5deg] group flex flex-col justify-between"><div className="sticky-pin" /><button onClick={() => { if(confirm("Discard note?")) { const u = journalEntries.filter(je => je.timestamp !== e.timestamp); setJournalEntries(u); save(habits, completions, systemState, activityLogs, u, conversations, quotes, reminders); } }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all">✕</button><div className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-4 text-center">{new Date(e.timestamp).toLocaleDateString()}</div><p className="text-xl font-bold text-slate-800 leading-tight">"{e.text}"</p></div>
                             ))}
-
-                            {/* Reminders (Pink) */}
                             {reminders.map((r, i) => (
-                                <div key={`rem-${i}`} className="dashboard-sticky dashboard-sticky-reminder p-10 min-h-[220px] relative transform rotate-[-1deg] group flex flex-col justify-center">
-                                    <div className="sticky-pin" />
-                                    <button onClick={() => { const ur = reminders.filter(rm => rm.timestamp !== r.timestamp); setReminders(ur); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, ur); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-500">✕</button>
-                                    <div className="flex items-center gap-2 mb-4">
-                                        <div className="w-2 h-2 rounded-full bg-red-400" />
-                                        <span className="text-[10px] font-black text-red-500 uppercase tracking-[0.2em]">Reminder</span>
-                                    </div>
-                                    <p className="text-xl font-bold text-red-900 leading-tight">"{r.text}"</p>
-                                </div>
+                                <div key={`rem-${i}`} className="dashboard-sticky dashboard-sticky-reminder p-10 min-h-[220px] relative transform rotate-[-1deg] group flex flex-col justify-center"><div className="sticky-pin" /><button onClick={() => { const ur = reminders.filter(rm => rm.timestamp !== r.timestamp); setReminders(ur); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, ur); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 transition-all hover:text-red-500">✕</button><span className="text-[10px] font-black text-red-500 uppercase tracking-[0.2em] mb-4">Identity Reminder</span><p className="text-xl font-bold text-red-900 leading-tight">"{r.text}"</p></div>
                             ))}
                         </div>
                     </div>
@@ -523,10 +383,36 @@
                                 <div className="text-5xl mb-2">{activePromptHabit?.icon}</div>
                                 <h2 className="text-2xl font-black text-slate-900 tracking-tight">{activePromptHabit?.name} Complete</h2>
                                 <p className="text-indigo-600 font-bold italic text-lg leading-relaxed">"{activePromptHabit?.prompt}"</p>
-                                <textarea autoFocus value={promptInput} onChange={e => setPromptInput(e.target.value)} className="w-full h-32 p-6 bg-slate-50 rounded-[2rem] outline-none border focus:ring-4 ring-indigo-50 text-slate-800" placeholder="Your answer..." />
+                                <textarea autoFocus value={promptInput} onChange={e => setPromptInput(e.target.value)} className="w-full h-32 p-6 bg-slate-50 rounded-[2rem] outline-none border focus:ring-4 ring-indigo-50 text-slate-800" placeholder="Capture your response..." />
                                 <div className="flex gap-4">
-                                    <button onClick={() => setIsPromptModalOpen(false)} className="flex-1 py-4 font-black text-slate-400 uppercase text-xs">Skip</button>
-                                    <button onClick={finalizePromptCompletion} className="flex-[2] bg-indigo-600 text-white py-5 rounded-[2rem] font-black shadow-xl hover:bg-indigo-700 transition-all uppercase text-xs">Log Response</button>
+                                    <button onClick={() => setIsPromptModalOpen(false)} className="flex-1 py-4 font-black text-slate-400 uppercase text-xs tracking-widest">Skip</button>
+                                    <button onClick={finalizePromptCompletion} className="flex-[2] bg-indigo-600 text-white py-5 rounded-[2rem] font-black shadow-xl hover:bg-indigo-700 transition-all uppercase text-xs tracking-widest">Log Insight</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* MODAL: DUAL CAPTURE (JOURNAL/REMINDER) */}
+                    {isJournalOpen && (
+                        <div className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+                            <div className="bg-white w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl border-white border-8 space-y-6 flex flex-col">
+                                <div className="flex bg-slate-50 p-1.5 rounded-[1.5rem] border">
+                                    <button onClick={() => setNoteType('reflection')} className={`flex-1 py-3 rounded-[1rem] text-[10px] font-black uppercase tracking-widest transition-all ${noteType === 'reflection' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-100'}`}>Reflection</button>
+                                    <button onClick={() => setNoteType('reminder')} className={`flex-1 py-3 rounded-[1rem] text-[10px] font-black uppercase tracking-widest transition-all ${noteType === 'reminder' ? 'bg-red-500 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-100'}`}>Reminder</button>
+                                </div>
+                                <h2 className="text-3xl font-black tracking-tighter text-center">{noteType === 'reflection' ? 'Establish Reflection' : 'Identity Reminder'}</h2>
+                                <textarea value={journalInput} onChange={e => setJournalInput(e.target.value)} className={`w-full h-64 p-8 rounded-[2rem] outline-none border-none leading-relaxed font-['Kalam'] text-xl shadow-inner resize-none ${noteType === 'reflection' ? 'bg-[#fff9c4] text-slate-800' : 'bg-[#fce4ec] text-red-900'}`} placeholder={noteType === 'reflection' ? "What's your raw truth today?" : "What do you need to remember for your rituals?"} />
+                                <div className="flex gap-4">
+                                    <button onClick={() => { setIsJournalOpen(false); setJournalInput(""); }} className="flex-1 py-4 font-black text-slate-400 uppercase text-xs tracking-widest">Discard</button>
+                                    <button onClick={() => { 
+                                        if (noteType === 'reflection') {
+                                            const u = [{ timestamp: new Date().toISOString(), text: journalInput }, ...journalEntries]; setJournalEntries(u); setIsJournalOpen(false); setJournalInput("");
+                                            save(habits, completions, systemState, logActivity('reflection', 'Pinned'), u, conversations, quotes, reminders);
+                                        } else {
+                                            const u = [{ timestamp: new Date().toISOString(), text: journalInput }, ...reminders]; setReminders(u); setIsJournalOpen(false); setJournalInput("");
+                                            save(habits, completions, systemState, logActivity('reminder', 'Pinned'), journalEntries, conversations, quotes, u);
+                                        }
+                                    }} className={`flex-[2] py-5 rounded-[2rem] font-black shadow-xl uppercase text-xs transition-all ${noteType === 'reflection' ? 'bg-indigo-600 text-white' : 'bg-red-500 text-white'}`}>Pin To Dashboard</button>
                                 </div>
                             </div>
                         </div>
@@ -536,90 +422,38 @@
                     {isAdding && (
                         <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-fade-in">
                             <div className="bg-white w-full max-w-lg rounded-[3rem] p-10 md:p-12 shadow-2xl border border-white space-y-6 max-h-[90vh] overflow-y-auto custom-scrollbar">
-                                <h2 className="text-3xl font-black tracking-tighter text-slate-900 text-center">{editingHabitId ? 'Update Ritual' : 'Establish Ritual'}</h2>
+                                <h2 className="text-3xl font-black tracking-tighter text-slate-900 text-center">{editingHabitId ? 'Update Architecture' : 'Establish Ritual'}</h2>
                                 <div className="space-y-6">
-                                    <div className="flex gap-4">
-                                        <input type="text" value={newHabit.icon} onChange={(e) => setNewHabit({...newHabit, icon: e.target.value})} className="w-20 p-5 bg-slate-50 border border-slate-100 rounded-3xl text-3xl text-center outline-none" />
-                                        <input type="text" value={newHabit.name} onChange={(e) => setNewHabit({...newHabit, name: e.target.value})} className="flex-1 p-5 bg-slate-50 border border-slate-100 rounded-3xl font-bold text-lg outline-none text-slate-800" placeholder="Ritual Name..." />
-                                    </div>
-                                    <div className="space-y-3">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 text-center block">Completion Prompt (Optional)</label>
-                                        <input type="text" value={newHabit.prompt} onChange={(e) => setNewHabit({...newHabit, prompt: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm italic outline-none text-slate-700" placeholder="e.g., What did you learn?" />
-                                    </div>
-                                    <div className="space-y-3">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 text-center block">Cycle Lock</label>
-                                        <div className="flex gap-2">
-                                            {['Morning', 'Afternoon', 'Evening'].map(cat => (
-                                                <button key={cat} onClick={() => setNewHabit({...newHabit, category: cat})} className={`flex-1 py-4 rounded-3xl text-[10px] font-black uppercase border transition-all ${newHabit.category === cat ? 'bg-indigo-600 text-white border-indigo-600 shadow-xl' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{cat}</button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-4 pt-4">
-                                        <button onClick={() => { setIsAdding(false); setEditingHabitId(null); }} className="flex-1 py-4 font-black text-slate-400 uppercase text-xs">Dismiss</button>
-                                        <button onClick={handleRitualSubmit} className="flex-[2] bg-indigo-600 text-white py-4 rounded-[2rem] font-black shadow-xl hover:bg-indigo-700 uppercase text-xs">{editingHabitId ? 'Update' : 'Establish'}</button>
-                                    </div>
+                                    <div className="flex gap-4"><input type="text" value={newHabit.icon} onChange={(e) => setNewHabit({...newHabit, icon: e.target.value})} className="w-20 p-5 bg-slate-50 border border-slate-100 rounded-3xl text-3xl text-center outline-none" /><input type="text" value={newHabit.name} onChange={(e) => setNewHabit({...newHabit, name: e.target.value})} className="flex-1 p-5 bg-slate-50 border border-slate-100 rounded-3xl font-bold text-lg outline-none text-slate-800" placeholder="Ritual Name..." /></div>
+                                    <div className="space-y-3"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 text-center block">Completion Prompt (Optional)</label><input type="text" value={newHabit.prompt} onChange={(e) => setNewHabit({...newHabit, prompt: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm italic outline-none text-slate-700 shadow-inner" placeholder="e.g., What was the core focus?" /></div>
+                                    <div className="space-y-3"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block">Cycle Lock</label><div className="flex gap-2">{['Morning', 'Afternoon', 'Evening'].map(cat => (<button key={cat} onClick={() => setNewHabit({...newHabit, category: cat})} className={`flex-1 py-4 rounded-3xl text-[10px] font-black uppercase border transition-all ${newHabit.category === cat ? 'bg-indigo-600 text-white border-indigo-600 shadow-xl' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{cat}</button>))}</div><p className="text-[9px] text-slate-400 font-medium px-1 italic text-center">Morning: 11 AM | Afternoon: 6 PM | Evening: Midnight</p></div>
+                                    <div className="flex gap-4 pt-4"><button onClick={() => { setIsAdding(false); setEditingHabitId(null); }} className="flex-1 py-4 font-black text-slate-400 uppercase text-xs tracking-widest">Discard</button><button onClick={handleRitualSubmit} className="flex-[2] bg-indigo-600 text-white py-4 rounded-[2rem] font-black shadow-xl hover:bg-indigo-700 transition-all uppercase text-xs tracking-widest">{editingHabitId ? 'Update' : 'Establish'}</button></div>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* AI MODAL */}
-                    {isAiOpen && (
-                        <div className="fixed inset-0 z-[110] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-4">
-                            <div className="bg-white w-full max-w-6xl rounded-[4rem] shadow-2xl h-[85vh] flex overflow-hidden border border-white/20">
-                                <div className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 transition-transform duration-300 fixed md:relative z-50 md:z-auto w-72 h-full bg-slate-50 border-r flex flex-col`}>
-                                    <div className="p-8 border-b flex items-center"><button onClick={createNewChat} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest">New Session +</button></div>
-                                    <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                                        {conversations.map(c => (
-                                            <div key={c.id} className={`p-5 rounded-[2rem] cursor-pointer transition-all ${activeChatId === c.id ? 'bg-white shadow-sm border border-indigo-100' : 'hover:bg-white/50'}`} onClick={() => { setActiveChatId(c.id); setIsSidebarOpen(false); }}>
-                                                <div className="text-[9px] font-black text-slate-400 uppercase mb-1 text-center">Session</div>
-                                                <div className="text-xs font-bold truncate text-slate-700">{c.title}</div>
-                                            </div>
-                                        ))}
+                    {/* SYSTEM CONFIG */}
+                    {isInfoOpen && (
+                        <div className="fixed inset-0 z-[120] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-6">
+                            <div className="bg-white w-full max-w-xl rounded-[4rem] p-12 shadow-2xl space-y-8 animate-fade-in flex flex-col max-h-[90vh]">
+                                <h2 className="text-4xl font-black">Identity Calibration</h2>
+                                <div className="space-y-6 overflow-y-auto pr-2 custom-scrollbar">
+                                    <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4">
+                                        <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest text-center">Data Integrity</h4>
+                                        <button onClick={handleExportData} className="w-full py-4 bg-white border-2 border-indigo-100 text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest shadow-sm hover:bg-indigo-50 transition-all flex items-center justify-center gap-2"><Cloud size={14} /> Export Identity Ledger (.txt)</button>
+                                    </div>
+                                    <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4 text-center">
+                                        <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Intelligence Setup</h4>
+                                        <input type="password" value={systemState.geminiKey} onChange={e => setSystemState({...systemState, geminiKey: e.target.value.trim()})} placeholder="Paste Gemini Key" className="w-full p-4 bg-white border rounded-2xl text-xs outline-none focus:ring-4 ring-indigo-100 shadow-sm" />
+                                        <textarea value={systemState.geminiPersona} onChange={e => setSystemState({...systemState, geminiPersona: e.target.value})} className="w-full p-4 h-32 bg-white border rounded-2xl text-xs outline-none focus:ring-4 ring-indigo-100 shadow-sm" />
+                                    </div>
+                                    <div className="p-8 bg-slate-50 rounded-[2.5rem] text-center">
+                                        <h4 className="text-[10px] font-black text-indigo-600 uppercase mb-4 tracking-widest">GMT Offset</h4>
+                                        <select value={systemState.gmtOffset} onChange={e => setSystemState({...systemState, gmtOffset: parseInt(e.target.value)})} className="p-3 w-full rounded-2xl font-bold bg-white border outline-none text-sm text-center shadow-sm">{Array.from({length:27}, (_,i)=>i-12).map(o => <option key={o} value={o}>GMT {o>=0?'+':''}{o}</option>)}</select>
                                     </div>
                                 </div>
-                                <div className="flex-1 flex flex-col bg-white relative">
-                                    <div className="p-8 border-b flex justify-between items-center bg-indigo-600 text-white shrink-0">
-                                        <div className="flex items-center gap-4"><button onClick={() => setIsSidebarOpen(true)} className="md:hidden bg-white/20 p-2 rounded-xl">≡</button><h2 className="text-2xl font-black tracking-tight">{activeChat?.title || "Adviser Session"}</h2></div>
-                                        <button onClick={() => setIsAiOpen(false)} className="bg-white/20 p-3 rounded-full hover:bg-white/30 transition-all">✕</button>
-                                    </div>
-                                    <div className="flex-1 overflow-y-auto p-6 md:p-10 space-y-6 custom-scrollbar bg-slate-50/30">
-                                        {activeChat?.messages.map((m, i) => <AiMessage key={i} text={m.text} role={m.role} />)}
-                                        {isAiLoading && <div className="text-[10px] font-black text-indigo-400 animate-pulse text-center uppercase tracking-widest">Architect is reasoning...</div>}
-                                    </div>
-                                    <div className="p-6 md:p-8 border-t flex gap-4 bg-white shrink-0">
-                                        <input value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAiSend()} className="flex-1 bg-slate-50 p-5 rounded-3xl text-sm outline-none border focus:border-indigo-200 shadow-inner" placeholder="Analyze my performance..." />
-                                        <button onClick={handleAiSend} className="bg-slate-900 text-white px-8 rounded-3xl font-black">→</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* MODAL: DUAL-MODE CAPTURE (Journal/Reminder) */}
-                    {isJournalOpen && (
-                        <div className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
-                            <div className="bg-white w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl border-white border-8 space-y-6 flex flex-col">
-                                <div className="flex bg-slate-50 p-1.5 rounded-[1.5rem] border">
-                                    <button onClick={() => setNoteType('reflection')} className={`flex-1 py-3 rounded-[1rem] text-[10px] font-black uppercase tracking-widest transition-all ${noteType === 'reflection' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-100'}`}>Reflection Note</button>
-                                    <button onClick={() => setNoteType('reminder')} className={`flex-1 py-3 rounded-[1rem] text-[10px] font-black uppercase tracking-widest transition-all ${noteType === 'reminder' ? 'bg-red-500 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-100'}`}>System Reminder</button>
-                                </div>
-                                <h2 className="text-3xl font-black tracking-tighter text-center">{noteType === 'reflection' ? 'Capture Reflection' : 'Identity Reminder'}</h2>
-                                <textarea value={journalInput} onChange={e => setJournalInput(e.target.value)} className={`w-full h-64 p-8 rounded-[2rem] outline-none border-none leading-relaxed font-['Kalam'] text-xl shadow-inner resize-none ${noteType === 'reflection' ? 'bg-[#fff9c4] text-slate-800' : 'bg-[#fce4ec] text-red-900'}`} placeholder={noteType === 'reflection' ? "What's your raw truth today?" : "What do you need to remember for your rituals?"} />
-                                <div className="flex gap-4">
-                                    <button onClick={() => { setIsJournalOpen(false); setJournalInput(""); }} className="flex-1 py-4 font-black text-slate-400 uppercase text-xs hover:text-slate-600 transition-colors">Discard</button>
-                                    <button onClick={() => { 
-                                        if (noteType === 'reflection') {
-                                            const entry = { timestamp: new Date().toISOString(), text: journalInput };
-                                            const updated = [entry, ...journalEntries]; setJournalEntries(updated); setIsJournalOpen(false); setJournalInput("");
-                                            save(habits, completions, systemState, logActivity('reflection', 'Pinned'), updated, conversations, quotes, reminders);
-                                        } else {
-                                            const entry = { timestamp: new Date().toISOString(), text: journalInput };
-                                            const updated = [entry, ...reminders]; setReminders(updated); setIsJournalOpen(false); setJournalInput("");
-                                            save(habits, completions, systemState, logActivity('reminder', 'Pinned'), journalEntries, conversations, quotes, updated);
-                                        }
-                                    }} className={`flex-[2] py-5 rounded-[2rem] font-black shadow-xl uppercase text-xs transition-all ${noteType === 'reflection' ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-red-500 text-white hover:bg-red-600'}`}>Pin To Dashboard</button>
-                                </div>
+                                <button onClick={() => { setIsInfoOpen(false); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders); }} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl active:scale-95 transition-all">Save & Close</button>
                             </div>
                         </div>
                     )}
@@ -633,47 +467,9 @@
                             <button onClick={() => setIsInfoOpen(true)} className="fab-menu-item w-14 h-14 bg-white border text-slate-700 rounded-2xl shadow-xl flex items-center justify-center text-xl hover:bg-slate-50 pointer-events-auto transition-all">⚙️</button>
                         </div>
                         <button className="w-16 h-16 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center transition-transform duration-300 group-hover:rotate-45">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                            <Plus size={28} />
                         </button>
                     </div>
-
-                    {/* CONFIG MODAL */}
-                    {isInfoOpen && (
-                        <div className="fixed inset-0 z-[120] bg-slate-900/90 backdrop-blur-lg flex items-center justify-center p-6">
-                            <div className="bg-white w-full max-w-xl rounded-[4rem] p-12 shadow-2xl space-y-8 animate-fade-in flex flex-col max-h-[90vh]">
-                                <h2 className="text-4xl font-black">Configuration</h2>
-                                <div className="space-y-6 overflow-y-auto pr-2 custom-scrollbar">
-                                    <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4">
-                                        <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest text-center">Pinboard Anchors</h4>
-                                        <div className="flex gap-2">
-                                            <input type="text" value={newQuoteInput} onChange={(e) => setNewQuoteInput(e.target.value)} placeholder="Add anchor..." className="flex-1 p-3 bg-white border rounded-xl text-xs outline-none shadow-inner" onKeyPress={e => e.key === 'Enter' && (setQuotes([...quotes, newQuoteInput]), setNewQuoteInput(''))} />
-                                            <button onClick={() => { if(!newQuoteInput) return; setQuotes([...quotes, newQuoteInput]); setNewQuoteInput(''); }} className="bg-indigo-600 text-white px-4 rounded-xl font-bold shadow-lg">+</button>
-                                        </div>
-                                        <div className="space-y-2 max-h-32 overflow-y-auto">
-                                            {quotes.map((q, i) => (
-                                                <div key={i} className="flex justify-between items-center text-[11px] p-2 bg-white rounded-lg border">
-                                                    <span className="truncate italic text-slate-600 font-['Kalam']">"{q}"</span>
-                                                    <button onClick={() => setQuotes(quotes.filter((_, idx) => idx !== i))} className="text-red-400 ml-2 hover:scale-110">✕</button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-4 text-center">
-                                        <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest text-center">Intelligence Setup</h4>
-                                        <input type="password" value={systemState.geminiKey} onChange={e => setSystemState({...systemState, geminiKey: e.target.value.trim()})} placeholder="Paste Gemini Key" className="w-full p-4 bg-white border rounded-2xl text-xs outline-none focus:ring-4 ring-indigo-100 shadow-sm" />
-                                        <textarea value={systemState.geminiPersona} onChange={e => setSystemState({...systemState, geminiPersona: e.target.value})} className="w-full p-4 h-32 bg-white border rounded-2xl text-xs outline-none focus:ring-4 ring-indigo-100 shadow-sm" />
-                                    </div>
-                                    <div className="p-8 bg-slate-50 rounded-[2.5rem] text-center">
-                                        <h4 className="text-[10px] font-black text-indigo-600 uppercase mb-4 tracking-widest">GMT Offset</h4>
-                                        <select value={systemState.gmtOffset} onChange={e => setSystemState({...systemState, gmtOffset: parseInt(e.target.value)})} className="p-3 w-full rounded-2xl font-bold bg-white border outline-none text-sm text-center">
-                                            {Array.from({length:27}, (_,i)=>i-12).map(o => <option key={o} value={o}>GMT {o>=0?'+':''}{o}</option>)}
-                                        </select>
-                                    </div>
-                                </div>
-                                <button onClick={() => { setIsInfoOpen(false); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders); }} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-800 transition-all">Save & Close</button>
-                            </div>
-                        </div>
-                    )}
 
                     {/* LEDGER MODAL */}
                     {isLogOpen && (
@@ -686,46 +482,11 @@
                                 </div>
                                 <div className="flex-1 overflow-y-auto custom-scrollbar space-y-8 p-4">
                                     {logTab === 'integrity' && integrityMetrics.logs.map((l, i) => (
-                                        <div key={i} className="p-6 bg-slate-50 rounded-[2.5rem] border flex flex-col gap-4 shadow-sm">
-                                            <div className="flex justify-between items-center">
-                                                <div className="space-y-1">
-                                                    <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{l.date} • {l.time}</div>
-                                                    <div className="text-sm font-bold text-slate-800">{l.reason}</div>
-                                                </div>
-                                                <div className={`text-sm font-black px-4 py-2 rounded-2xl ${l.type==='plus'?'text-emerald-600 bg-emerald-50':'text-orange-600 bg-orange-50'}`}>{l.points}</div>
-                                            </div>
-                                            {l.answer && <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100/50 italic text-xs text-indigo-900">“{l.answer}”</div>}
-                                        </div>
+                                        <div key={i} className="p-6 bg-slate-50 rounded-[2.5rem] border flex flex-col gap-4 shadow-sm"><div className="flex justify-between items-center"><div className="space-y-1"><div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{l.date} • {l.time}</div><div className="text-sm font-bold text-slate-800">{l.reason}</div></div><div className={`text-sm font-black px-4 py-2 rounded-2xl ${l.type==='plus'?'text-emerald-600 bg-emerald-50':'text-orange-600 bg-orange-50'}`}>{l.points}</div></div>{l.answer && <div className="bg-indigo-50/50 p-4 rounded-2xl italic text-xs text-indigo-900">“{l.answer}”</div>}</div>
                                     ))}
-                                    {logTab === 'activity' && activityLogs.map((log, i) => <div key={i} className="p-5 bg-slate-50 rounded-[2rem] border text-[11px] font-bold text-slate-800 transition-all hover:bg-white shadow-sm">{log.humanReadable}</div>)}
-                                    {logTab === 'journal' && (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                            {journalEntries.map((e, i) => (
-                                                <div key={i} className={`dashboard-sticky p-8 rounded-sm transform ${i % 2 === 0 ? '-rotate-1' : 'rotate-1'} hover:rotate-0 transition-transform duration-300 relative group`}>
-                                                    <div className="sticky-pin" />
-                                                    <div className="flex justify-between items-start mb-4">
-                                                        <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">{new Date(e.timestamp).toLocaleDateString()}</span>
-                                                        <button onClick={() => { if(confirm("Remove note?")) { const u = journalEntries.filter(je => je.timestamp !== e.timestamp); setJournalEntries(u); save(habits, completions, systemState, activityLogs, u, conversations, quotes, reminders); } }} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-500 transition-all">✕</button>
-                                                    </div>
-                                                    <p className="text-lg font-bold text-slate-700 leading-tight">"{e.text}"</p>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                    {logTab === 'reminders' && (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                            {reminders.map((r, i) => (
-                                                <div key={i} className={`dashboard-sticky dashboard-sticky-reminder p-8 rounded-sm transform ${i % 2 === 0 ? 'rotate-1' : '-rotate-1'} hover:rotate-0 transition-transform duration-300 relative group`}>
-                                                    <div className="sticky-pin" />
-                                                    <div className="flex justify-between items-start mb-4">
-                                                        <span className="text-[9px] font-black text-red-400 uppercase tracking-widest">Active Reminder</span>
-                                                        <button onClick={() => { const ur = reminders.filter(rm => rm.timestamp !== r.timestamp); setReminders(ur); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, ur); }} className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all">✕</button>
-                                                    </div>
-                                                    <p className="text-lg font-bold text-red-900 leading-tight">"{r.text}"</p>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
+                                    {logTab === 'activity' && activityLogs.map((log, i) => <div key={i} className="p-5 bg-slate-50 rounded-[2rem] border text-[11px] font-bold text-slate-800 shadow-sm">{log.humanReadable}</div>)}
+                                    {logTab === 'journal' && (<div className="grid grid-cols-1 md:grid-cols-2 gap-6">{journalEntries.map((e, i) => (<div key={i} className={`dashboard-sticky p-8 rounded-sm transform ${i % 2 === 0 ? '-rotate-1' : 'rotate-1'} group`}><div className="sticky-pin" /><div className="flex justify-between items-start mb-4"><span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">{new Date(e.timestamp).toLocaleDateString()}</span><button onClick={() => { if(confirm("Remove note?")) { const u = journalEntries.filter(je => je.timestamp !== e.timestamp); setJournalEntries(u); save(habits, completions, systemState, activityLogs, u, conversations, quotes, reminders); } }} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-500 transition-all">✕</button></div><p className="text-lg font-bold text-slate-700 leading-tight">"{e.text}"</p></div>))}</div>)}
+                                    {logTab === 'reminders' && (<div className="grid grid-cols-1 md:grid-cols-2 gap-6">{reminders.map((r, i) => (<div key={i} className={`dashboard-sticky dashboard-sticky-reminder p-8 rounded-sm transform ${i % 2 === 0 ? 'rotate-1' : '-rotate-1'} group`}><div className="sticky-pin" /><div className="flex justify-between items-start mb-4"><span className="text-[9px] font-black text-red-400 uppercase tracking-widest">Active Reminder</span><button onClick={() => { const ur = reminders.filter(rm => rm.timestamp !== r.timestamp); setReminders(ur); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, ur); }} className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all">✕</button></div><p className="text-lg font-bold text-red-900 leading-tight">"{r.text}"</p></div>))}</div>)}
                                 </div>
                             </div>
                         </div>
