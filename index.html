@@ -96,24 +96,19 @@
             Edit: ({size=24, className=""}) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>,
             Check: ({size=24, className=""}) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="20 6 9 17 4 12"></polyline></svg>,
             Menu: ({size=24, className=""}) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>,
-            Link: ({size=24, className=""}) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+            List: ({size=24, className=""}) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
         };
 
         // --- CONSTANTS ---
         const DEFAULT_HABITS = [
-            { id: '1', name: 'Deep Work', icon: '💻', category: 'Morning', limit: 11, prompt: 'What was your primary focus?' },
-            { id: '2', name: 'Movement', icon: '🏃', category: 'Afternoon', limit: 18, prompt: '' },
-            { id: '3', name: 'Hydration', icon: '💧', category: 'Morning', limit: 11, prompt: '' },
-            { id: '4', name: 'Reading', icon: '📖', category: 'Evening', limit: 24, prompt: 'What insight did you gain?' }
-        ];
-
-        const DEFAULT_LINKS = [
-            { id: '1', title: 'Google Calendar', url: 'https://calendar.google.com', icon: '📅' },
-            { id: '2', title: 'Spotify Focus', url: 'https://open.spotify.com', icon: '🎵' }
+            { id: '1', name: 'Deep Work', icon: '💻', start: 8, end: 11, category: 'Morning', prompt: 'What was your primary focus?' },
+            { id: '2', name: 'Movement', icon: '🏃', start: 16, end: 18, category: 'Afternoon', prompt: '' },
+            { id: '3', name: 'Hydration', icon: '💧', start: 6, end: 11, category: 'Morning', prompt: '' },
+            { id: '4', name: 'Reading', icon: '📖', start: 20, end: 24, category: 'Evening', prompt: 'What insight did you gain?' }
         ];
 
         const DEFAULT_PERSONA = "You are the 'Mindful Architect,' a grounded mentor for FocusLab. Integrity is math: $I = \\frac{\\sum Actions}{\\sum Promises}$. Analyze behavioral logs, dashboard stickies, reminders, and habit-specific answers to find why I fail. Use Markdown and LaTeX.";
-        const STORAGE_KEY = 'focuslab_v5.6_final_sidebar_fix';
+        const STORAGE_KEY = 'focuslab_v5.8_start_end_locks';
         const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
         const AiMessage = React.memo(({ text, role }) => {
@@ -137,7 +132,6 @@
                 const timer = setInterval(() => setDate(new Date()), 1000);
                 return () => clearInterval(timer);
             }, []);
-            
             const adjusted = new Date(date.getTime() + (date.getTimezoneOffset() * 60000) + (3600000 * gmtOffset));
             return (
                 <span className="text-xs font-black text-slate-700 tracking-widest">
@@ -156,9 +150,10 @@
             const [activityLogs, setActivityLogs] = useState([]);
             const [journalEntries, setJournalEntries] = useState([]); 
             const [reminders, setReminders] = useState([]); 
+            const [todos, setTodos] = useState([]); 
             const [conversations, setConversations] = useState([]);
             const [quotes, setQuotes] = useState(["Your word is your bond.", "Behavior is the only truth."]);
-            const [quickLinks, setQuickLinks] = useState(DEFAULT_LINKS);
+            const [quickLinks, setQuickLinks] = useState([]);
             const [activeChatId, setActiveChatId] = useState(null);
             const [viewDate, setViewDate] = useState(new Date()); 
             
@@ -171,10 +166,11 @@
             const [isAiOpen, setIsAiOpen] = useState(false);
             const [isJournalOpen, setIsJournalOpen] = useState(false);
             const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
-            const [isNavSidebarOpen, setIsNavSidebarOpen] = useState(false); // Quick Access Sidebar
+            const [isNavSidebarOpen, setIsNavSidebarOpen] = useState(false); 
             const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
+            const [isTaskModalOpen, setIsTaskModalOpen] = useState(false); 
             
-            // Dual-Capture Note State
+            // Note Capture Modal State
             const [noteType, setNoteType] = useState('reflection'); 
             
             // Prompt Feature State
@@ -189,9 +185,10 @@
             const [systemState, setSystemState] = useState({ 
                 gmtOffset: 6, geminiKey: '', geminiPersona: DEFAULT_PERSONA, lastCommit: '', commitTime: 0 
             });
-            const [newHabit, setNewHabit] = useState({ name: '', icon: '✨', category: 'Morning', prompt: '' });
+            const [newHabit, setNewHabit] = useState({ name: '', icon: '✨', start: 8, end: 11, category: 'Morning', prompt: '' });
             const [newQuoteInput, setNewQuoteInput] = useState("");
             const [newLink, setNewLink] = useState({ title: '', url: '', icon: '🔗' });
+            const [newTask, setNewTask] = useState(""); 
             const [time, setTime] = useState(new Date());
 
             const services = useMemo(() => {
@@ -216,11 +213,11 @@
             const isCommitted = useMemo(() => systemState.lastCommit === todayKey, [systemState.lastCommit, todayKey]);
             const activeChat = useMemo(() => conversations.find(c => c.id === activeChatId), [conversations, activeChatId]);
 
-            const save = async (h, c, s, logs, journal, chats, q, r, links) => {
+            const save = async (h, c, s, logs, journal, chats, q, r, links, tasks) => {
                 const payload = { 
                     habits: h, completions: c, systemState: s, activityLogs: logs, 
                     journalEntries: journal, conversations: chats, quotes: q, reminders: r,
-                    quickLinks: links
+                    quickLinks: links, todos: tasks
                 };
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
                 if (user && !user.isAnonymous && services) {
@@ -238,6 +235,29 @@
                 return updated;
             };
 
+            // --- TASK LOGIC ---
+            const addTask = () => {
+                if (!newTask.trim()) return;
+                const task = { id: Date.now().toString(), text: newTask, done: false, createdAt: new Date().toISOString() };
+                const updated = [task, ...todos];
+                setTodos(updated);
+                setNewTask("");
+                save(habits, completions, systemState, logActivity('add_task', 'Added to Protocol'), journalEntries, conversations, quotes, reminders, quickLinks, updated);
+            };
+
+            const toggleTask = (id) => {
+                const updated = todos.map(t => t.id === id ? { ...t, done: !t.done } : t);
+                setTodos(updated);
+                const task = updated.find(t => t.id === id);
+                save(habits, completions, systemState, logActivity(task.done ? 'complete_task' : 'reopen_task', task.text), journalEntries, conversations, quotes, reminders, quickLinks, updated);
+            };
+
+            const deleteTask = (id) => {
+                const updated = todos.filter(t => t.id !== id);
+                setTodos(updated);
+                save(habits, completions, systemState, logActivity('delete_task', 'Removed'), journalEntries, conversations, quotes, reminders, quickLinks, updated);
+            };
+
             // --- LINK MANAGEMENT ---
             const addQuickLink = () => {
                 if (!newLink.title || !newLink.url) return;
@@ -245,37 +265,29 @@
                 setQuickLinks(updated);
                 setNewLink({ title: '', url: '', icon: '🔗' });
                 setIsLinkModalOpen(false);
-                save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders, updated);
+                save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders, updated, todos);
             };
 
             const deleteQuickLink = (id) => {
                 if (!confirm("Remove this shortcut?")) return;
                 const updated = quickLinks.filter(l => l.id !== id);
                 setQuickLinks(updated);
-                save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders, updated);
+                save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders, updated, todos);
             };
 
-            // --- AI LOGIC (ROBUST KEY HANDLING) ---
+            // --- AI LOGIC ---
             const callGemini = async (prompt, currentMessages) => {
-                // FALLBACK KEY CHECK
-                const userKey = systemState.geminiKey;
-                const envKey = typeof apiKey !== 'undefined' ? apiKey : ""; 
-                const effectiveKey = userKey || envKey;
-
-                if (!effectiveKey) {
-                    addAssistantMessage("Critical: No API Key found. Please add your Gemini API Key in Settings (⚙️) to activate me.");
-                    return;
-                }
-                
+                const apiKey = ""; // Managed by environment
                 setIsAiLoading(true);
                 const recentJournals = journalEntries.slice(0, 5).map(j => j.text).join('\n');
                 const activeRemindersText = reminders.map(r => r.text).join('\n');
                 const ritualResponses = Object.keys(completions).filter(k => completions[k].answer).slice(-10).map(k => `[Habit Response]: ${completions[k].answer}`).join('\n');
-                
-                const systemPrompt = `${systemState.geminiPersona}\n\nUSER DATA:\nIntegrity: ${integrityMetrics.pts}pts\nReflections:\n${recentJournals}\nReminders:\n${activeRemindersText}\nFollow-ups:\n${ritualResponses}`;
+                const taskStatus = `Pending: ${todos.filter(t => !t.done).length}, Completed: ${todos.filter(t => t.done).length}`;
+
+                const systemPrompt = `${systemState.geminiPersona}\n\nUSER DATA:\nIntegrity: ${integrityMetrics.pts}pts\nTasks: ${taskStatus}\nJournal Notes:\n${recentJournals}\nReminders:\n${activeRemindersText}\nBehavioral Feedback:\n${ritualResponses}`;
                 
                 try {
-                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${effectiveKey}`, {
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
@@ -289,25 +301,12 @@
                             ]
                         })
                     });
-                    
                     const data = await res.json();
-                    
-                    if (data.error) {
-                        throw new Error(data.error.message);
-                    }
-
-                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "The Architect is silent (No content generated).";
+                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "Architect silent.";
                     const updated = conversations.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, { role: 'assistant', text }], lastUpdated: new Date().toISOString() } : c);
                     setConversations(updated);
-                    save(habits, completions, systemState, activityLogs, journalEntries, updated, quotes, reminders, quickLinks);
-                } catch (e) {
-                    addAssistantMessage(`Adviser Error: ${e.message}`);
-                } finally { setIsAiLoading(false); }
-            };
-
-            const addAssistantMessage = (msg) => {
-                const updated = conversations.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, { role: 'assistant', text: msg }] } : c);
-                setConversations(updated);
+                    save(habits, completions, systemState, activityLogs, journalEntries, updated, quotes, reminders, quickLinks, todos);
+                } catch (e) {} finally { setIsAiLoading(false); }
             };
 
             const handleAiSend = () => {
@@ -320,28 +319,47 @@
             };
 
             const createNewChat = () => {
-                const newChat = { id: Date.now().toString(), title: `Session ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`, messages: [{ role: 'assistant', text: "Adviser present. Ready to analyze your integrity data. Where shall we begin?" }], lastUpdated: new Date().toISOString() };
+                const newChat = { id: Date.now().toString(), title: `Chat ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`, messages: [{ role: 'assistant', text: "Adviser present. I've synced your latest notes and reminders. How shall we begin?" }], lastUpdated: new Date().toISOString() };
                 const updated = [newChat, ...conversations]; setConversations(updated); setActiveChatId(newChat.id);
-                save(habits, completions, systemState, activityLogs, journalEntries, updated, quotes, reminders, quickLinks);
+                save(habits, completions, systemState, activityLogs, journalEntries, updated, quotes, reminders, quickLinks, todos);
             };
 
+            // --- HABIT ACTIONS (UPDATED FOR START/END LOCK) ---
             const toggleHabit = (day, habit) => {
                 const key = `${viewDate.getFullYear()}-${String(viewDate.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}-${habit.id}`;
                 const isT = day === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth();
-                const expired = isT && currentHour >= (habit.limit || 24);
+                
+                // --- LOCK LOGIC START ---
+                // habit.start and habit.end are hours (0-24)
+                const startHour = habit.start || 0; 
+                const endHour = habit.end || 24;
+                
                 const newC = {...completions};
+
                 if (newC[key]) {
+                    // Turn Off
                     delete newC[key];
                     setCompletions(newC);
-                    save(habits, newC, systemState, logActivity('untoggle', habit.name), journalEntries, conversations, quotes, reminders, quickLinks);
+                    save(habits, newC, systemState, logActivity('untoggle', habit.name), journalEntries, conversations, quotes, reminders, quickLinks, todos);
                 } else {
-                    if (expired && !confirm("Marking this as LATE (-0.5 pts)?")) return;
+                    // Turn On
+                    if (isT) {
+                         if (currentHour < startHour) {
+                             alert(`Ritual Locked. Window opens at ${format12h(startHour)}.`);
+                             return;
+                         }
+                    }
+
+                    const expired = isT && currentHour >= endHour;
+
+                    if (expired && !confirm("Window Closed. Marking this as LATE (-0.5 pts)?")) return;
+                    
                     if (habit.prompt) {
                         setActivePromptHabit(habit); setPendingCompletionKey(key); setIsPromptModalOpen(true); setPromptInput("");
                     } else {
                         newC[key] = { timestamp: adjustedTime.toISOString(), isLate: !isT || expired };
                         setCompletions(newC);
-                        save(habits, newC, systemState, logActivity('toggle', habit.name), journalEntries, conversations, quotes, reminders, quickLinks);
+                        save(habits, newC, systemState, logActivity('toggle', habit.name), journalEntries, conversations, quotes, reminders, quickLinks, todos);
                     }
                 }
             };
@@ -350,34 +368,43 @@
                 const habit = activePromptHabit; const key = pendingCompletionKey; if (!habit || !key) return;
                 const dayParts = key.split('-');
                 const isT = parseInt(dayParts[2]) === adjustedTime.getUTCDate() && (parseInt(dayParts[1]) - 1) === adjustedTime.getUTCMonth();
-                const expired = isT && currentHour >= (habit.limit || 24);
+                const endHour = habit.end || 24;
+                const expired = isT && currentHour >= endHour;
                 const newC = { ...completions, [key]: { timestamp: adjustedTime.toISOString(), isLate: !isT || expired, answer: promptInput } };
                 setCompletions(newC);
-                save(habits, newC, systemState, logActivity('toggle', habit.name + ' (w/ answer)'), journalEntries, conversations, quotes, reminders, quickLinks);
+                save(habits, newC, systemState, logActivity('toggle', habit.name + ' (w/ answer)'), journalEntries, conversations, quotes, reminders, quickLinks, todos);
                 setIsPromptModalOpen(false); setActivePromptHabit(null); setPendingCompletionKey(null);
             };
 
             const handleRitualSubmit = () => {
                 if (!newHabit.name) return;
-                const limits = { Morning: 11, Afternoon: 18, Evening: 24 };
                 let updated;
+                // Ensure defaults if not set in UI (though UI forces them now)
+                const finalHabit = {
+                    ...newHabit,
+                    start: parseInt(newHabit.start) || 0,
+                    end: parseInt(newHabit.end) || 24
+                };
+
                 if (editingHabitId) {
-                    updated = habits.map(h => h.id === editingHabitId ? { ...h, ...newHabit, limit: limits[newHabit.category] || 24 } : h);
+                    updated = habits.map(h => h.id === editingHabitId ? { ...h, ...finalHabit } : h);
                     logActivity('edit_ritual', newHabit.name);
                 } else {
-                    updated = [...habits, { ...newHabit, id: Date.now().toString(), limit: limits[newHabit.category] || 24 }];
+                    updated = [...habits, { ...finalHabit, id: Date.now().toString() }];
                     logActivity('add_ritual', newHabit.name);
                 }
                 setHabits(updated);
-                save(updated, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders, quickLinks);
-                setNewHabit({ name: '', icon: '✨', category: 'Morning', prompt: '' }); setEditingHabitId(null); setIsAdding(false);
+                save(updated, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders, quickLinks, todos);
+                setNewHabit({ name: '', icon: '✨', category: 'Morning', prompt: '', start: 8, end: 11 }); 
+                setEditingHabitId(null); 
+                setIsAdding(false);
             };
 
             const deleteHabit = (id) => {
                 if (!confirm("Permanently retire this ritual?")) return;
                 const updated = habits.filter(h => h.id !== id);
                 setHabits(updated);
-                save(updated, completions, systemState, logActivity('delete_ritual', 'ID: '+id), journalEntries, conversations, quotes, reminders, quickLinks);
+                save(updated, completions, systemState, logActivity('delete_ritual', 'ID: '+id), journalEntries, conversations, quotes, reminders, quickLinks, todos);
             };
 
             const integrityMetrics = useMemo(() => {
@@ -395,11 +422,39 @@
                 return { pts, title: currentTier.t, nextTier: nextTier.t, progress, logs };
             }, [habits, completions]);
 
-            const formatLimit = (limit) => {
-                if (limit === 24) return "11:59 PM";
-                const hour = limit % 12 || 12;
-                return `${hour}:00 ${limit >= 12 ? 'PM' : 'AM'}`;
+            const format12h = (hour) => {
+                if (hour === 24) return "12 AM (Night)";
+                const h = hour % 12 || 12;
+                const ampm = hour >= 12 && hour < 24 ? 'PM' : 'AM';
+                return `${h} ${ampm}`;
             };
+            
+            const formatTimeRange = (start, end) => {
+                return `${format12h(start)} - ${format12h(end)}`;
+            };
+
+            const getNextObjective = () => {
+                // Find habits that are currently active (start <= now < end) and not done
+                // Priority to CORE habits
+                const activeHabits = habits.filter(h => {
+                    const key = `${todayKey}-${h.id}`;
+                    return !completions[key] && currentHour >= h.start && currentHour < h.end;
+                });
+                
+                if (activeHabits.length === 0) return null;
+                
+                // Sort: Core first, then by earliest end time (urgency)
+                activeHabits.sort((a, b) => {
+                    if (a.priority === 'core' && b.priority !== 'core') return -1;
+                    if (b.priority === 'core' && a.priority !== 'core') return 1;
+                    return a.end - b.end;
+                });
+                
+                return activeHabits[0];
+            };
+            
+            const nextObjective = useMemo(getNextObjective, [habits, completions, currentHour, todayKey]);
+
 
             // --- INIT ---
             useEffect(() => {
@@ -407,13 +462,22 @@
                 const local = localStorage.getItem(STORAGE_KEY);
                 if (local) {
                     const p = JSON.parse(local);
-                    setHabits(p.habits || DEFAULT_HABITS); setCompletions(p.completions || {});
+                    // Migrate habits if they are old format (missing start/end)
+                    const migratedHabits = (p.habits || DEFAULT_HABITS).map(h => ({
+                        ...h,
+                        start: h.start !== undefined ? h.start : 0, // Default start
+                        end: h.end !== undefined ? h.end : (h.limit || 24) // Default end or map from old limit
+                    }));
+                    
+                    setHabits(migratedHabits); 
+                    setCompletions(p.completions || {});
                     setActivityLogs(p.activityLogs || []); setJournalEntries(p.journalEntries || []);
                     setConversations(p.conversations || []); if (p.systemState) setSystemState(p.systemState);
                     if (p.conversations?.length) setActiveChatId(p.conversations[0].id);
                     if (p.quotes) setQuotes(p.quotes);
                     if (p.reminders) setReminders(p.reminders);
                     if (p.quickLinks) setQuickLinks(p.quickLinks);
+                    if (p.todos) setTodos(p.todos);
                 }
                 return () => clearInterval(timer);
             }, []);
@@ -441,6 +505,17 @@
                             <button onClick={() => setIsNavSidebarOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">✕</button>
                         </div>
                         <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+                            <div 
+                                onClick={() => { setIsTaskModalOpen(true); setIsNavSidebarOpen(false); }}
+                                className="flex items-center justify-between p-4 rounded-2xl bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 transition-all cursor-pointer group"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <span className="text-xl">⚔️</span>
+                                    <span className="text-sm font-bold text-indigo-900">Task Protocol</span>
+                                </div>
+                                <span className="bg-indigo-200 text-indigo-700 text-[9px] font-black px-2 py-1 rounded-full">{todos.filter(t=>!t.done).length}</span>
+                            </div>
+                            
                             {quickLinks.map(link => (
                                 <div key={link.id} className="flex items-center justify-between p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 transition-all group">
                                     <a href={link.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 flex-1">
@@ -450,7 +525,6 @@
                                     <button onClick={() => deleteQuickLink(link.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Icons.Trash size={14} /></button>
                                 </div>
                             ))}
-                            {quickLinks.length === 0 && <div className="text-center text-slate-400 text-xs italic py-10">Add tools for quick access.</div>}
                         </div>
                         <div className="p-6 border-t bg-slate-50/50">
                             <button onClick={() => setIsLinkModalOpen(true)} className="w-full py-4 bg-white border border-slate-200 text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2">
@@ -496,10 +570,27 @@
                     <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className={`p-8 rounded-[3.5rem] shadow-xl transition-all duration-500 flex flex-col justify-between min-h-[220px] ${isCommitted ? 'bg-white border' : 'integrity-gradient text-white shadow-indigo-200/50'}`}>
                             <div><h3 className="text-[10px] font-black uppercase opacity-60 mb-2 tracking-widest">Daily Oath</h3>{!isCommitted ? <p className="text-lg font-bold leading-tight">Commit your word to unlock the grid.</p> : <p className="text-lg font-bold italic text-slate-800">Identity locked. Rituals active.</p>}</div>
-                            {!isCommitted && <button onClick={() => { const ns = {...systemState, lastCommit: todayKey, commitTime: Date.now()}; setSystemState(ns); save(habits, completions, ns, logActivity('commit', todayKey), journalEntries, conversations, quotes, reminders, quickLinks); }} className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black shadow-xl hover:scale-105 active:scale-95 transition-all">Seal Today</button>}
+                            {!isCommitted && <button onClick={() => { const ns = {...systemState, lastCommit: todayKey, commitTime: Date.now()}; setSystemState(ns); save(habits, completions, ns, logActivity('commit', todayKey), journalEntries, conversations, quotes, reminders, quickLinks, todos); }} className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black shadow-xl hover:scale-105 active:scale-95 transition-all">Seal Today</button>}
                         </div>
                         <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border flex flex-col justify-center items-center group text-center"><div className="text-7xl font-black tracking-tighter group-hover:text-indigo-600 transition-colors">{integrityMetrics.pts}</div><div className="text-[10px] font-black uppercase text-slate-400 mt-2 tracking-[0.2em]">Honesty Quotient</div></div>
-                        <div className="bg-indigo-600 p-8 rounded-[3.5rem] shadow-xl text-white flex flex-col justify-between relative overflow-hidden"><div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl" /><p className="text-sm font-medium opacity-90 italic z-10 text-white">"Identity is establishing a history of kept promises."</p><button onClick={() => { setNoteType('reflection'); setIsJournalOpen(true); }} className="w-full py-4 bg-white text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-50 transition-all z-10 text-center">Capture Truth 📝</button></div>
+                        
+                        {/* NEXT OBJECTIVE CARD (Smart Recommendation) */}
+                        <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border border-slate-100 flex flex-col justify-between group overflow-hidden relative">
+                             <div>
+                                <h3 className="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest">Next Objective</h3>
+                                {nextObjective ? (
+                                    <div className="space-y-2">
+                                        <div className="text-2xl font-black text-indigo-900 leading-tight">{nextObjective.icon} {nextObjective.name}</div>
+                                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-slate-50 px-2 py-1 rounded w-fit">
+                                            Window: {formatTimeRange(nextObjective.start, nextObjective.end)}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <p className="text-lg font-bold text-slate-300 italic">No active rituals in current window.</p>
+                                )}
+                             </div>
+                             <div className="absolute -bottom-4 -right-4 text-[8rem] opacity-5 select-none pointer-events-none">⚡</div>
+                        </div>
                     </section>
 
                     {/* RITUAL GRID */}
@@ -509,23 +600,46 @@
                                 <thead className="bg-slate-50/50">
                                     <tr>
                                         <th className="sticky-col p-8 text-left border-b min-w-[280px]">
-                                            <div className="flex items-center justify-between"><div className="flex flex-col gap-1"><span className="text-[11px] font-black uppercase text-slate-400 tracking-[0.2em]">Ritual Stack</span><span className="text-[9px] font-bold text-indigo-500 uppercase tracking-widest">Time-Lock Active</span></div><button onClick={() => { setEditingHabitId(null); setNewHabit({ name: '', icon: '✨', category: 'Morning', prompt: '' }); setIsAdding(true); }} className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-xl shadow-lg active:scale-90 transition-all"><Icons.Plus size={16} /></button></div>
+                                            <div className="flex items-center justify-between"><div className="flex flex-col gap-1"><span className="text-[11px] font-black uppercase text-slate-400 tracking-[0.2em]">Ritual Stack</span><span className="text-[9px] font-bold text-indigo-500 uppercase tracking-widest">Time-Lock Active</span></div><button onClick={() => { setEditingHabitId(null); setNewHabit({ name: '', icon: '✨', category: 'Morning', prompt: '', start: 8, end: 11 }); setIsAdding(true); }} className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-xl shadow-lg active:scale-90 transition-all"><Icons.Plus size={16} /></button></div>
                                         </th>
                                         {Array.from({length:31}, (_,i)=>i+1).map(d => { const isT = d === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth(); return <th key={d} className={`p-4 border-b text-[10px] font-black ${isT ? 'text-indigo-600 bg-indigo-50/50' : 'text-slate-300'}`}>{isT ? 'TODAY' : d}</th> })}
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-50">
                                     {habits.map(h => {
-                                        const isUrgent = h.limit - currentHour > 0 && h.limit - currentHour <= 2;
+                                        // "Urgent" if active and less than 2 hours remaining
+                                        const isActive = currentHour >= h.start && currentHour < h.end;
+                                        const remaining = h.end - currentHour;
+                                        const isUrgent = isActive && remaining <= 2;
+                                        
                                         return (
                                             <tr key={h.id} className="group hover:bg-slate-50/10 transition-colors">
                                                 <td className="sticky-col p-8 font-bold text-base text-slate-800">
-                                                    <div className="flex items-center justify-between"><div className="flex flex-col gap-1"><div className="flex items-center gap-2"><span>{h.icon}</span><span className="truncate max-w-[120px]">{h.name}</span></div><div className="flex items-center gap-2"><span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Locks {formatLimit(h.limit)}</span>{isUrgent && <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-ping" />}</div></div><div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => { setNewHabit({ name: h.name, icon: h.icon, category: h.category, prompt: h.prompt || '' }); setEditingHabitId(h.id); setIsAdding(true); }} className="p-2 text-slate-300 hover:text-indigo-600 transition-all"><Icons.Edit size={14} /></button><button onClick={() => deleteHabit(h.id)} className="p-2 text-slate-300 hover:text-red-500 transition-all"><Icons.Trash size={14} /></button></div></div>
+                                                    <div className="flex items-center justify-between"><div className="flex flex-col gap-1"><div className="flex items-center gap-2"><span>{h.icon}</span><span className="truncate max-w-[120px]">{h.name}</span></div><div className="flex items-center gap-2"><span className="text-[9px] font-black text-slate-400 uppercase tracking-widest bg-slate-100 px-2 py-0.5 rounded">{formatTimeRange(h.start, h.end)}</span>{isUrgent && <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-ping" />}</div></div><div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => { setNewHabit({ name: h.name, icon: h.icon, category: h.category, prompt: h.prompt || '', start: h.start, end: h.end }); setEditingHabitId(h.id); setIsAdding(true); }} className="p-2 text-slate-300 hover:text-indigo-600 transition-all"><Icons.Edit size={14} /></button><button onClick={() => deleteHabit(h.id)} className="p-2 text-slate-300 hover:text-red-500 transition-all"><Icons.Trash size={14} /></button></div></div>
                                                 </td>
                                                 {Array.from({length:31}, (_,i)=>i+1).map(day => {
                                                     const key = `${viewDate.getFullYear()}-${String(viewDate.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}-${h.id}`;
-                                                    const isDone = completions[key]; const isT = day === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth(); const expired = isT && currentHour >= (h.limit || 24);
-                                                    return <td key={day} className={`p-2 text-center transition-all ${isT ? 'bg-indigo-50/10' : ''}`}><button onClick={() => toggleHabit(day, h)} className={`check-anim w-12 h-12 rounded-2xl flex items-center justify-center mx-auto transition-all ${isDone ? 'bg-indigo-600 text-white shadow-lg' : expired ? 'bg-slate-100 text-slate-300' : 'bg-slate-50 text-slate-200 hover:bg-slate-100'} ${isT && !isDone && isUrgent ? 'border-2 border-red-400 urgent-pulse' : ''}`}>{isDone ? <Icons.Check size={16} /> : expired ? '✕' : '•'}</button></td>
+                                                    const isDone = completions[key]; 
+                                                    const isT = day === adjustedTime.getUTCDate() && viewDate.getMonth() === adjustedTime.getUTCMonth(); 
+                                                    
+                                                    // Expiration logic:
+                                                    // If today: expired if current hour >= end hour
+                                                    // If past: always expired (unless done)
+                                                    let isExpired = false;
+                                                    if (isT) {
+                                                        isExpired = currentHour >= h.end;
+                                                    } else {
+                                                        // Check if day is in past relative to adjustedTime
+                                                        const cellDate = new Date(viewDate.getFullYear(), viewDate.getMonth(), day);
+                                                        const todayDate = new Date(adjustedTime.getFullYear(), adjustedTime.getMonth(), adjustedTime.getUTCDate());
+                                                        if (cellDate < todayDate) isExpired = true;
+                                                    }
+
+                                                    return (
+                                                        <td key={day} className={`p-2 text-center transition-all ${isT ? 'bg-indigo-50/10' : ''}`}>
+                                                            <button onClick={() => toggleHabit(day, h)} className={`check-anim w-12 h-12 rounded-2xl flex items-center justify-center mx-auto transition-all ${isDone ? 'bg-indigo-600 text-white shadow-lg' : isExpired ? 'bg-slate-100 text-slate-300' : 'bg-slate-50 text-slate-200 hover:bg-slate-100'} ${isT && !isDone && isUrgent ? 'border-2 border-red-400 urgent-pulse' : ''}`}>{isDone ? <Icons.Check size={16} /> : isExpired ? '✕' : '•'}</button>
+                                                        </td>
+                                                    );
                                                 })}
                                             </tr>
                                         );
@@ -546,10 +660,10 @@
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-10 px-4 pb-20">
                             {quotes.map((q, i) => (
-                                <div key={`quote-${i}`} className="dashboard-sticky p-10 min-h-[220px] relative transform rotate-[-2deg] flex items-center justify-center text-center group"><div className="sticky-pin" /><button onClick={() => { const nq = quotes.filter((_, idx) => idx !== i); setQuotes(nq); save(habits, completions, systemState, activityLogs, journalEntries, conversations, nq, reminders, quickLinks); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-600 transition-all"><Icons.Trash size={14} /></button><p className="text-2xl font-bold text-slate-700 italic leading-tight">"{q}"</p></div>
+                                <div key={`quote-${i}`} className="dashboard-sticky p-10 min-h-[220px] relative transform rotate-[-2deg] flex items-center justify-center text-center group"><div className="sticky-pin" /><button onClick={() => { const nq = quotes.filter((_, idx) => idx !== i); setQuotes(nq); save(habits, completions, systemState, activityLogs, journalEntries, conversations, nq, reminders, quickLinks, todos); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-600 transition-all"><Icons.Trash size={14} /></button><p className="text-2xl font-bold text-slate-700 italic leading-tight">"{q}"</p></div>
                             ))}
                             {reminders.map((r, i) => (
-                                <div key={`rem-${i}`} className="dashboard-sticky dashboard-sticky-reminder p-10 min-h-[220px] relative transform rotate-[-1deg] group flex flex-col justify-center text-center"><div className="sticky-pin" /><button onClick={() => { const ur = reminders.filter(rm => rm.timestamp !== r.timestamp); setReminders(ur); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, ur, quickLinks); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-600 transition-all"><Icons.Trash size={14} /></button><span className="text-[10px] font-black text-red-500 uppercase tracking-[0.2em] mb-4">Identity Reminder</span><p className="text-xl font-bold text-red-900 leading-tight">"{r.text}"</p></div>
+                                <div key={`rem-${i}`} className="dashboard-sticky dashboard-sticky-reminder p-10 min-h-[220px] relative transform rotate-[-1deg] group flex flex-col justify-center text-center"><div className="sticky-pin" /><button onClick={() => { const ur = reminders.filter(rm => rm.timestamp !== r.timestamp); setReminders(ur); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, ur, quickLinks, todos); }} className="absolute top-4 right-4 text-red-300 opacity-0 group-hover:opacity-100 hover:text-red-600 transition-all"><Icons.Trash size={14} /></button><span className="text-[10px] font-black text-red-500 uppercase tracking-[0.2em] mb-4">Identity Reminder</span><p className="text-xl font-bold text-red-900 leading-tight">"{r.text}"</p></div>
                             ))}
                         </div>
                     </div>
@@ -562,10 +676,35 @@
                                     <div className="text-5xl mb-2">{activePromptHabit?.icon}</div>
                                     <h2 className="text-2xl font-black text-slate-900 tracking-tight">{activePromptHabit?.name} Complete</h2>
                                     <p className="text-indigo-600 font-bold italic text-lg leading-relaxed">"{activePromptHabit?.prompt}"</p>
-                                    <textarea autoFocus value={promptInput} onChange={e => setPromptInput(e.target.value)} className="w-full h-32 p-6 bg-slate-50 rounded-[2rem] outline-none border-2 border-transparent focus:border-indigo-100 focus:bg-white text-slate-800 transition-all" placeholder="Your answer..." />
+                                    <textarea autoFocus value={promptInput} onChange={e => setPromptInput(e.target.value)} className="w-full h-32 p-6 bg-slate-50 rounded-[2rem] outline-none border focus:ring-4 ring-indigo-50 text-slate-800 shadow-inner" placeholder="Your answer..." />
                                     <div className="flex gap-4">
                                         <button onClick={() => setIsPromptModalOpen(false)} className="flex-1 py-4 font-black text-slate-400 uppercase text-xs tracking-widest">Skip</button>
-                                        <button onClick={finalizePromptCompletion} className="flex-[2] bg-indigo-600 text-white py-5 rounded-[2rem] font-black shadow-xl hover:bg-indigo-700 transition-all uppercase text-xs tracking-widest hover:scale-105">Log Insight</button>
+                                        <button onClick={finalizePromptCompletion} className="flex-[2] bg-indigo-600 text-white py-5 rounded-[2rem] font-black shadow-xl hover:bg-indigo-700 transition-all uppercase text-xs tracking-widest">Log Insight</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {isJournalOpen && (
+                            <div className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-xl flex items-center justify-center p-4 animate-fade-in">
+                                <div className={`w-full max-w-2xl rounded-[3rem] p-12 shadow-2xl space-y-6 flex flex-col transition-colors duration-500 ${noteType === 'reflection' ? 'bg-white' : 'bg-[#fce4ec]'}`}>
+                                    <div className="flex justify-center gap-4 mb-4">
+                                        <button onClick={() => setNoteType('reflection')} className={`px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${noteType === 'reflection' ? 'bg-slate-900 text-white' : 'bg-black/5 text-black/40'}`}>Reflection</button>
+                                        <button onClick={() => setNoteType('reminder')} className={`px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${noteType === 'reminder' ? 'bg-red-600 text-white' : 'bg-black/5 text-black/40'}`}>Reminder</button>
+                                    </div>
+                                    <h2 className="text-4xl font-black tracking-tighter text-center">{noteType === 'reflection' ? 'Capture Reflection' : 'Identity Reminder'}</h2>
+                                    <textarea value={journalInput} onChange={e => setJournalInput(e.target.value)} className={`w-full h-64 p-8 rounded-[2rem] outline-none border-none leading-relaxed font-['Kalam'] text-xl shadow-inner resize-none ${noteType === 'reflection' ? 'bg-[#fff9c4] text-slate-800' : 'bg-[#fce4ec] text-red-900'}`} placeholder={noteType === 'reflection' ? "What's your raw truth today?" : "What must be remembered?"} />
+                                    <div className="flex gap-4">
+                                        <button onClick={() => { setIsJournalOpen(false); setJournalInput(""); }} className="flex-1 py-4 font-black text-slate-500 uppercase text-xs hover:bg-white/20 rounded-2xl transition-colors">Discard</button>
+                                        <button onClick={() => { 
+                                            if (noteType === 'reflection') {
+                                                const u = [{ timestamp: new Date().toISOString(), text: journalInput }, ...journalEntries]; setJournalEntries(u); setIsJournalOpen(false); setJournalInput("");
+                                                save(habits, completions, systemState, logActivity('reflection', 'Sealed'), u, conversations, quotes, reminders, quickLinks, todos);
+                                            } else {
+                                                const u = [{ timestamp: new Date().toISOString(), text: journalInput }, ...reminders]; setReminders(u); setIsJournalOpen(false); setJournalInput("");
+                                                save(habits, completions, systemState, logActivity('reminder', 'Pinned'), journalEntries, conversations, quotes, u, quickLinks, todos);
+                                            }
+                                        }} className={`flex-[2] py-5 rounded-[2rem] font-black shadow-xl uppercase text-xs hover:scale-105 transition-all text-white ${noteType === 'reflection' ? 'bg-indigo-600' : 'bg-red-500'}`}>{noteType === 'reflection' ? 'Save to Ledger' : 'Pin to Board'}</button>
                                     </div>
                                 </div>
                             </div>
@@ -588,31 +727,39 @@
                             </div>
                         )}
 
-                        {isJournalOpen && (
-                            <div className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-xl flex items-center justify-center p-4 animate-fade-in">
-                                <div className={`w-full max-w-2xl rounded-[3rem] p-12 shadow-2xl space-y-6 flex flex-col transition-colors duration-500 ${noteType === 'reflection' ? 'bg-white' : 'bg-[#fce4ec]'}`}>
-                                    <div className="flex justify-center gap-4 mb-4">
-                                        <button onClick={() => setNoteType('reflection')} className={`px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${noteType === 'reflection' ? 'bg-slate-900 text-white' : 'bg-black/5 text-black/40'}`}>Reflection</button>
-                                        <button onClick={() => setNoteType('reminder')} className={`px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${noteType === 'reminder' ? 'bg-red-600 text-white' : 'bg-black/5 text-black/40'}`}>Reminder</button>
+                        {isTaskModalOpen && (
+                            <div className="fixed inset-0 z-[140] bg-slate-900/60 backdrop-blur-xl flex items-center justify-center p-4 animate-fade-in">
+                                <div className="bg-white w-full max-w-3xl rounded-[4rem] p-10 shadow-2xl relative flex flex-col max-h-[85vh]">
+                                    <div className="flex justify-between items-center mb-6">
+                                        <h2 className="text-3xl font-black tracking-tighter">Task Protocol</h2>
+                                        <button onClick={() => setIsTaskModalOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">✕</button>
                                     </div>
-                                    <h2 className="text-4xl font-black tracking-tighter text-center text-slate-800/90">{noteType === 'reflection' ? 'Field Note' : 'Identity Reminder'}</h2>
-                                    <textarea 
-                                        value={journalInput} 
-                                        onChange={e => setJournalInput(e.target.value)} 
-                                        className={`w-full h-64 p-8 rounded-[2rem] outline-none border-2 leading-relaxed shadow-inner resize-none text-slate-800 placeholder-slate-400/60 ${noteType === 'reflection' ? 'font-sans text-base bg-slate-50 border-slate-100' : 'font-[\'Kalam\'] text-2xl bg-white/50 border-none'}`} 
-                                        placeholder={noteType === 'reflection' ? "Log your observations..." : "What must be remembered?"} 
-                                    />
-                                    <div className="flex gap-4">
-                                        <button onClick={() => { setIsJournalOpen(false); setJournalInput(""); }} className="flex-1 py-4 font-black text-slate-500 uppercase text-xs hover:bg-black/5 rounded-2xl transition-colors">Discard</button>
-                                        <button onClick={() => { 
-                                            if (noteType === 'reflection') {
-                                                const u = [{ timestamp: new Date().toISOString(), text: journalInput }, ...journalEntries]; setJournalEntries(u); setIsJournalOpen(false); setJournalInput("");
-                                                save(habits, completions, systemState, logActivity('reflection', 'Sealed'), u, conversations, quotes, reminders, quickLinks);
-                                            } else {
-                                                const u = [{ timestamp: new Date().toISOString(), text: journalInput }, ...reminders]; setReminders(u); setIsJournalOpen(false); setJournalInput("");
-                                                save(habits, completions, systemState, logActivity('reminder', 'Pinned'), journalEntries, conversations, quotes, u, quickLinks);
-                                            }
-                                        }} className={`flex-[2] py-5 rounded-[2rem] font-black shadow-xl uppercase text-xs hover:scale-105 transition-all text-white ${noteType === 'reflection' ? 'bg-slate-900' : 'bg-red-500'}`}>{noteType === 'reflection' ? 'Save to Ledger' : 'Pin to Board'}</button>
+                                    
+                                    <div className="flex gap-2 mb-6">
+                                        <input 
+                                            type="text" 
+                                            value={newTask} 
+                                            onChange={e => setNewTask(e.target.value)}
+                                            onKeyPress={e => e.key === 'Enter' && addTask()}
+                                            placeholder="What needs to be done?" 
+                                            className="flex-1 p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-indigo-400 transition-colors"
+                                        />
+                                        <button onClick={addTask} className="bg-indigo-600 text-white px-6 rounded-2xl font-black hover:bg-indigo-700 transition-all"><Icons.Plus size={20} /></button>
+                                    </div>
+
+                                    <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
+                                        {todos.filter(t => !t.done).length === 0 && todos.length > 0 && <div className="text-center text-slate-400 text-sm py-8">All tasks clear. Great work.</div>}
+                                        {todos.length === 0 && <div className="text-center text-slate-300 italic py-10">No tasks defined.</div>}
+                                        
+                                        {todos.map(task => (
+                                            <div key={task.id} className={`flex items-center gap-4 p-4 rounded-2xl border transition-all ${task.done ? 'bg-slate-50 border-transparent opacity-60' : 'bg-white border-slate-100 hover:border-indigo-100'}`}>
+                                                <button onClick={() => toggleTask(task.id)} className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${task.done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-transparent hover:border-indigo-400'}`}>
+                                                    <Icons.Check size={14} />
+                                                </button>
+                                                <span className={`flex-1 font-medium ${task.done ? 'line-through text-slate-400' : 'text-slate-800'}`}>{task.text}</span>
+                                                <button onClick={() => deleteTask(task.id)} className="text-slate-300 hover:text-red-500 transition-colors"><Icons.Trash size={16} /></button>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             </div>
@@ -661,11 +808,16 @@
                                             <input type="text" value={newHabit.prompt} onChange={(e) => setNewHabit({...newHabit, prompt: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm italic outline-none text-slate-700 shadow-inner" placeholder="e.g., What did you learn?" />
                                         </div>
                                         <div className="space-y-3">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block">Cycle Lock</label>
-                                            <div className="flex gap-2">
-                                                {['Morning', 'Afternoon', 'Evening'].map(cat => (
-                                                    <button key={cat} onClick={() => setNewHabit({...newHabit, category: cat})} className={`flex-1 py-4 rounded-3xl text-[10px] font-black uppercase border transition-all ${newHabit.category === cat ? 'bg-indigo-600 text-white border-indigo-600 shadow-xl' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{cat}</button>
-                                                ))}
+                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block">Active Window (Hours)</label>
+                                            <div className="flex gap-3">
+                                                <div className="flex-1">
+                                                    <span className="text-[9px] font-bold text-slate-400 ml-2">Start (0-23)</span>
+                                                    <input type="number" min="0" max="23" value={newHabit.start !== undefined ? newHabit.start : 0} onChange={(e) => setNewHabit({...newHabit, start: parseInt(e.target.value)})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-center outline-none" />
+                                                </div>
+                                                <div className="flex-1">
+                                                    <span className="text-[9px] font-bold text-slate-400 ml-2">End (1-24)</span>
+                                                    <input type="number" min="1" max="24" value={newHabit.end !== undefined ? newHabit.end : 24} onChange={(e) => setNewHabit({...newHabit, end: parseInt(e.target.value)})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-center outline-none" />
+                                                </div>
                                             </div>
                                         </div>
                                         <div className="flex gap-4 pt-4">
@@ -707,7 +859,7 @@
                                             <select value={systemState.gmtOffset} onChange={e => setSystemState({...systemState, gmtOffset: parseInt(e.target.value)})} className="p-3 w-full rounded-2xl font-bold bg-white border outline-none text-sm text-center shadow-sm">{Array.from({length:27}, (_,i)=>i-12).map(o => <option key={o} value={o}>GMT {o>=0?'+':''}{o}</option>)}</select>
                                         </div>
                                     </div>
-                                    <button onClick={() => { setIsInfoOpen(false); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders, quickLinks); }} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl active:scale-95 transition-all">Save & Close</button>
+                                    <button onClick={() => { setIsInfoOpen(false); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, reminders, quickLinks, todos); }} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl active:scale-95 transition-all">Save & Close</button>
                                 </div>
                             </div>
                         )}
@@ -733,7 +885,7 @@
                                                         <div className="absolute -left-[21px] top-0 w-3 h-3 rounded-full bg-slate-200 border-2 border-white ring-2 ring-indigo-50" />
                                                         <div className="flex justify-between items-start mb-2">
                                                             <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{new Date(e.timestamp).toLocaleString()}</span>
-                                                            <button onClick={() => { if(confirm("Permanently erase this record?")) { const u = journalEntries.filter(je => je.timestamp !== e.timestamp); setJournalEntries(u); save(habits, completions, systemState, activityLogs, u, conversations, quotes, reminders, quickLinks); } }} className="text-slate-300 hover:text-red-500 transition-colors"><Icons.Trash size={14} /></button>
+                                                            <button onClick={() => { if(confirm("Permanently erase this record?")) { const u = journalEntries.filter(je => je.timestamp !== e.timestamp); setJournalEntries(u); save(habits, completions, systemState, activityLogs, u, conversations, quotes, reminders, quickLinks, todos); } }} className="text-slate-300 hover:text-red-500 transition-colors"><Icons.Trash size={14} /></button>
                                                         </div>
                                                         <p className="text-sm text-slate-700 leading-relaxed font-sans border-l-2 border-indigo-100 pl-4 py-1">{e.text}</p>
                                                     </div>
@@ -741,7 +893,7 @@
                                                 {journalEntries.length === 0 && <div className="text-center py-20 text-slate-300 font-medium italic">Timeline clear. Begin your observation log.</div>}
                                             </div>
                                         )}
-                                        {logTab === 'reminders' && (<div className="grid grid-cols-1 md:grid-cols-2 gap-6">{reminders.map((r, i) => (<div key={i} className={`dashboard-sticky dashboard-sticky-reminder p-8 rounded-sm transform ${i % 2 === 0 ? 'rotate-1' : '-rotate-1'} group`}><div className="sticky-pin" /><div className="flex justify-between items-start mb-4"><span className="text-[9px] font-black text-red-400 uppercase tracking-widest">Active Reminder</span><button onClick={() => { const ur = reminders.filter(rm => rm.timestamp !== r.timestamp); setReminders(ur); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, ur, quickLinks); }} className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all"><Icons.Trash size={14} /></button></div><p className="text-lg font-bold text-red-900 leading-tight">"{r.text}"</p></div>))}</div>)}
+                                        {logTab === 'reminders' && (<div className="grid grid-cols-1 md:grid-cols-2 gap-6">{reminders.map((r, i) => (<div key={i} className={`dashboard-sticky dashboard-sticky-reminder p-8 rounded-sm transform ${i % 2 === 0 ? 'rotate-1' : '-rotate-1'} group`}><div className="sticky-pin" /><div className="flex justify-between items-start mb-4"><span className="text-[9px] font-black text-red-400 uppercase tracking-widest">Active Reminder</span><button onClick={() => { const ur = reminders.filter(rm => rm.timestamp !== r.timestamp); setReminders(ur); save(habits, completions, systemState, activityLogs, journalEntries, conversations, quotes, ur, quickLinks, todos); }} className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all"><Icons.Trash size={14} /></button></div><p className="text-lg font-bold text-red-900 leading-tight">"{r.text}"</p></div>))}</div>)}
                                     </div>
                                 </div>
                             </div>
